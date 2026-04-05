@@ -338,23 +338,28 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
         const isPaused = currentInstance?.paused ?? false;
 
         if (!isLoggedOut && !isPaused) {
-          setTimeout(() => createBotInstance(userId, phone, true, false), 5000);
+          setTimeout(() => createBotInstance(userId, phone, false, false), 5000);
         }
       }
 
       if (connection === "open") {
         logger.info({ userId }, "Paired and connected!");
+        const pairInst = botInstances.get(userId);
+        if (pairInst) pairInst.connected = true;
 
+        const [dbUser] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
         await db.update(usersTable)
           .set({ status: "active", lastSeen: new Date(), isFirstConnection: "false" })
           .where(eq(usersTable.id, userId));
 
-        const jid = `${phone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
-        try {
-          await sock.sendMessage(jid, {
-            text: `✅ *NUTTER-XMD V.9.1.3* connected successfully!\n\nType *.menu* to get started ⚡\n\n_Powered by *NUTTER-XMD* ⚡_`,
-          });
-        } catch (_) {}
+        if (dbUser?.isFirstConnection !== "false") {
+          const jid = `${phone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
+          try {
+            await sock.sendMessage(jid, {
+              text: `✅ *NUTTER-XMD V.9.1.3* connected successfully!\n\nType *.menu* to get started ⚡\n\n_Powered by *NUTTER-XMD* ⚡_`,
+            });
+          } catch (_) {}
+        }
 
         handlePresence(sock, userId);
 

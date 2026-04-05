@@ -83,7 +83,7 @@ router.get("/admin/users", requireAdmin, async (_req, res) => {
 
   const result = users.map(u => ({
     ...u,
-    connected: botInstances.has(u.id),
+    connected: botInstances.get(u.id)?.connected === true,
   }));
 
   res.json(result);
@@ -115,7 +115,7 @@ router.get("/admin/users/:id/session", requireAdmin, async (req: Request<{ id: s
     return;
   }
 
-  const connected = botInstances.has(id);
+  const connected = botInstances.get(id)?.connected === true;
   res.json({ ...user, connected });
 });
 

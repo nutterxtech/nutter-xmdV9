@@ -6,7 +6,7 @@ import { Request, Response, NextFunction } from "express";
 
 const router = Router();
 
-async function requireUser(req: Request, res: Response, next: NextFunction): Promise<void> {
+async function requireUser(req: Request<{ userId: string }>, res: Response, next: NextFunction): Promise<void> {
   const userId = req.params.userId;
   if (!userId) {
     res.status(400).json({ error: "userId required" });
@@ -42,8 +42,8 @@ async function requireUser(req: Request, res: Response, next: NextFunction): Pro
   res.status(401).json({ error: "Unauthorized" });
 }
 
-router.get("/settings/:userId", requireUser, async (req, res) => {
-  const { userId } = req.params;
+router.get("/settings/:userId", requireUser, async (req: Request<{ userId: string }>, res) => {
+  const userId = req.params.userId;
   const [settings] = await db.select().from(userSettingsTable).where(eq(userSettingsTable.userId, userId));
   if (!settings) {
     res.status(404).json({ error: "Settings not found" });
@@ -52,8 +52,8 @@ router.get("/settings/:userId", requireUser, async (req, res) => {
   res.json(settings);
 });
 
-router.patch("/settings/:userId", requireUser, async (req, res) => {
-  const { userId } = req.params;
+router.patch("/settings/:userId", requireUser, async (req: Request<{ userId: string }>, res) => {
+  const userId = req.params.userId;
   const updates = req.body as Record<string, unknown>;
 
   const allowed = [

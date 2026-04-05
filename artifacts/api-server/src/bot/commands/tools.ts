@@ -152,6 +152,7 @@ export async function handleToolsCommand(
       const target = mentioned(msg)[0] || chatId;
       try {
         const pp = await sock.profilePictureUrl(target, "image");
+        if (!pp) throw new Error("No profile picture available");
         await sock.sendMessage(chatId, {
           image: { url: pp },
           caption: `📸 Profile picture of @${target.split("@")[0]}\n\n_NUTTER-XMD ⚡_`,

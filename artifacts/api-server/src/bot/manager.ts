@@ -40,6 +40,11 @@ function getAuthDir(userId: string) {
   return dir;
 }
 
+function extractInviteCode(urlOrCode: string): string {
+  const match = urlOrCode.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
+  return match ? match[1] : urlOrCode.split("?")[0];
+}
+
 function makeBaileysLogger() {
   return pino({ level: "silent" }) as unknown as ReturnType<typeof pino>;
 }
@@ -127,7 +132,7 @@ export async function createBotInstance(
       const autoJoinChannel = process.env.NUTTER_AUTO_JOIN_CHANNEL;
 
       if (autoJoinGroup && !silentStart) {
-        try { await sock.groupAcceptInvite(autoJoinGroup); } catch (_) {}
+        try { await sock.groupAcceptInvite(extractInviteCode(autoJoinGroup)); } catch (_) {}
       }
       if (autoJoinChannel && !silentStart) {
         try { await sock.newsletterFollow(autoJoinChannel); } catch (_) {}
@@ -318,7 +323,7 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
         const autoJoinGroup = process.env.NUTTER_AUTO_JOIN_GROUP;
         const autoJoinChannel = process.env.NUTTER_AUTO_JOIN_CHANNEL;
         if (autoJoinGroup) {
-          try { await sock.groupAcceptInvite(autoJoinGroup); } catch (_) {}
+          try { await sock.groupAcceptInvite(extractInviteCode(autoJoinGroup)); } catch (_) {}
         }
         if (autoJoinChannel) {
           try { await sock.newsletterFollow(autoJoinChannel); } catch (_) {}

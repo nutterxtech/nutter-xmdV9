@@ -375,15 +375,14 @@ export default function Admin() {
 
                     <div style={{ marginTop: "1rem", paddingTop: "1rem", borderTop: "1px solid #1e3a5f" }}>
                       <p style={{ color: "#64748b", fontSize: "0.75rem", fontWeight: 600, textTransform: "uppercase", marginBottom: "0.5rem" }}>Settings</p>
-                      {userDetails.settings && Object.entries(userDetails.settings as Record<string, unknown>)
-                        .filter(([k]) => k !== "userId")
-                        .map(([key, val]) => (
-                          <DetailRow
-                            key={key}
-                            label={key}
-                            value={typeof val === "boolean" ? (val ? "✅" : "❌") : String(val ?? "—")}
-                          />
-                        ))}
+                      {userDetails.settings != null
+                        ? Object.entries(userDetails.settings as Record<string, unknown>)
+                          .filter(([k]) => k !== "userId")
+                          .map(([key, val]) => {
+                            const display: string = typeof val === "boolean" ? (val ? "✅" : "❌") : String(val ?? "—");
+                            return <DetailRow key={key} label={key} value={display} />;
+                          })
+                        : null}
                     </div>
                   </>
                 )}

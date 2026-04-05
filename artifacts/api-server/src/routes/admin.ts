@@ -89,8 +89,8 @@ router.get("/admin/users", requireAdmin, async (_req, res) => {
   res.json(result);
 });
 
-router.get("/admin/users/:id/settings", requireAdmin, async (req, res) => {
-  const { id } = req.params;
+router.get("/admin/users/:id/settings", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const id = req.params.id;
   const [settings] = await db.select().from(userSettingsTable).where(eq(userSettingsTable.userId, id));
   if (!settings) {
     res.status(404).json({ error: "Not found" });
@@ -99,8 +99,8 @@ router.get("/admin/users/:id/settings", requireAdmin, async (req, res) => {
   res.json(settings);
 });
 
-router.get("/admin/users/:id/session", requireAdmin, async (req, res) => {
-  const { id } = req.params;
+router.get("/admin/users/:id/session", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const id = req.params.id;
   const [user] = await db.select({
     sessionId: usersTable.sessionId,
     phone: usersTable.phone,
@@ -119,32 +119,32 @@ router.get("/admin/users/:id/session", requireAdmin, async (req, res) => {
   res.json({ ...user, connected });
 });
 
-router.post("/admin/users/:id/disconnect", requireAdmin, async (req, res) => {
-  const { id } = req.params;
+router.post("/admin/users/:id/disconnect", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const id = req.params.id;
   await disconnectBotInstance(id);
   stopPresence(id);
   await db.update(usersTable).set({ status: "paused", lastSeen: new Date() }).where(eq(usersTable.id, id));
   res.json({ success: true, message: "Bot disconnected and logged out" });
 });
 
-router.post("/admin/users/:id/pause", requireAdmin, async (req, res) => {
-  const { id } = req.params;
+router.post("/admin/users/:id/pause", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const id = req.params.id;
   await db.update(usersTable).set({ status: "paused" }).where(eq(usersTable.id, id));
   await pauseBotInstance(id);
   stopPresence(id);
   res.json({ success: true, message: "Bot paused" });
 });
 
-router.post("/admin/users/:id/suspend", requireAdmin, async (req, res) => {
-  const { id } = req.params;
+router.post("/admin/users/:id/suspend", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const id = req.params.id;
   await db.update(usersTable).set({ status: "suspended" }).where(eq(usersTable.id, id));
   await disconnectBotInstance(id);
   stopPresence(id);
   res.json({ success: true, message: "User suspended" });
 });
 
-router.delete("/admin/users/:id", requireAdmin, async (req, res) => {
-  const { id } = req.params;
+router.delete("/admin/users/:id", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const id = req.params.id;
   await disconnectBotInstance(id);
   stopPresence(id);
   await db.delete(userSettingsTable).where(eq(userSettingsTable.userId, id));

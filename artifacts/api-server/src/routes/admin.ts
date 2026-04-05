@@ -1,23 +1,22 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { db } from "@workspace/db";
-import { usersTable, userSettingsTable } from "@workspace/db";
+import { usersTable, userSettingsTable, accountsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { botInstances, pauseBotInstance, disconnectBotInstance } from "../bot/manager.js";
+import { botInstances, disconnectBotInstance, deleteBotSession } from "../bot/manager.js";
 import { stopPresence } from "../bot/presence.js";
 
 const router = Router();
 
 function getAdminCredentials(): { username: string; key: string } | null {
-  const username = process.env.ADMIN_USERNAME;
   const key = process.env.ADMIN_KEY;
-  if (!username || !key) return null;
-  return { username, key };
+  if (!key) return null;
+  return { username: "nutterx", key };
 }
 
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   const creds = getAdminCredentials();
   if (!creds) {
-    res.status(500).json({ error: "Server misconfigured: ADMIN_USERNAME or ADMIN_KEY not set" });
+    res.status(500).json({ error: "Admin key not configured" });
     return;
   }
 
@@ -55,7 +54,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
 router.post("/admin/login", (req, res) => {
   const creds = getAdminCredentials();
   if (!creds) {
-    res.status(500).json({ error: "Server misconfigured: ADMIN_KEY not set" });
+    res.status(500).json({ error: "Admin key not configured" });
     return;
   }
 
@@ -70,28 +69,85 @@ router.post("/admin/login", (req, res) => {
   res.json({ token, username });
 });
 
-router.get("/admin/users", requireAdmin, async (_req, res) => {
-  const users = await db.select({
-    id: usersTable.id,
-    phone: usersTable.phone,
-    status: usersTable.status,
-    sessionId: usersTable.sessionId,
-    linkedAt: usersTable.linkedAt,
-    lastSeen: usersTable.lastSeen,
-    isFirstConnection: usersTable.isFirstConnection,
-  }).from(usersTable);
+router.get("/admin/accounts", requireAdmin, async (_req, res) => {
+  const accounts = await db.select({
+    id: accountsTable.id,
+    email: accountsTable.email,
+    username: accountsTable.username,
+    createdAt: accountsTable.createdAt,
+  }).from(accountsTable);
 
-  const result = users.map(u => ({
-    ...u,
-    connected: botInstances.get(u.id)?.connected === true,
+  const bots = await db.select().from(usersTable);
+
+  const result = accounts.map(a => ({
+    ...a,
+    bots: bots
+      .filter(b => b.accountId === a.id)
+      .map(b => ({
+        id: b.id,
+        name: b.name,
+        phone: b.phone,
+        status: b.status,
+        linkedAt: b.linkedAt,
+        lastSeen: b.lastSeen,
+        connected: botInstances.get(b.id)?.connected === true,
+      })),
   }));
 
   res.json(result);
 });
 
-router.get("/admin/users/:id/settings", requireAdmin, async (req: Request<{ id: string }>, res) => {
-  const id = req.params.id;
-  const [settings] = await db.select().from(userSettingsTable).where(eq(userSettingsTable.userId, id));
+router.get("/admin/bots", requireAdmin, async (_req, res) => {
+  const bots = await db.select().from(usersTable);
+  const result = bots.map(b => ({
+    id: b.id,
+    accountId: b.accountId,
+    name: b.name,
+    phone: b.phone,
+    status: b.status,
+    sessionId: b.sessionId,
+    linkedAt: b.linkedAt,
+    lastSeen: b.lastSeen,
+    isFirstConnection: b.isFirstConnection,
+    connected: botInstances.get(b.id)?.connected === true,
+  }));
+  res.json(result);
+});
+
+router.get("/admin/accounts/:id", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const { id } = req.params;
+  const [account] = await db
+    .select({ id: accountsTable.id, email: accountsTable.email, username: accountsTable.username, createdAt: accountsTable.createdAt })
+    .from(accountsTable)
+    .where(eq(accountsTable.id, id));
+
+  if (!account) {
+    res.status(404).json({ error: "Account not found" });
+    return;
+  }
+
+  const bots = await db.select().from(usersTable).where(eq(usersTable.accountId, id));
+  const botDetails = await Promise.all(bots.map(async b => {
+    const [settings] = await db.select().from(userSettingsTable).where(eq(userSettingsTable.userId, b.id));
+    return {
+      id: b.id,
+      name: b.name,
+      phone: b.phone,
+      status: b.status,
+      sessionId: b.sessionId,
+      linkedAt: b.linkedAt,
+      lastSeen: b.lastSeen,
+      isFirstConnection: b.isFirstConnection,
+      connected: botInstances.get(b.id)?.connected === true,
+      settings: settings ?? null,
+    };
+  }));
+
+  res.json({ ...account, bots: botDetails });
+});
+
+router.get("/admin/bots/:id/settings", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const [settings] = await db.select().from(userSettingsTable).where(eq(userSettingsTable.userId, req.params.id));
   if (!settings) {
     res.status(404).json({ error: "Not found" });
     return;
@@ -99,57 +155,42 @@ router.get("/admin/users/:id/settings", requireAdmin, async (req: Request<{ id: 
   res.json(settings);
 });
 
-router.get("/admin/users/:id/session", requireAdmin, async (req: Request<{ id: string }>, res) => {
-  const id = req.params.id;
-  const [user] = await db.select({
-    sessionId: usersTable.sessionId,
-    phone: usersTable.phone,
-    status: usersTable.status,
-    isFirstConnection: usersTable.isFirstConnection,
-    lastSeen: usersTable.lastSeen,
-    linkedAt: usersTable.linkedAt,
-  }).from(usersTable).where(eq(usersTable.id, id));
-
-  if (!user) {
-    res.status(404).json({ error: "Not found" });
-    return;
-  }
-
-  const connected = botInstances.get(id)?.connected === true;
-  res.json({ ...user, connected });
-});
-
-router.post("/admin/users/:id/disconnect", requireAdmin, async (req: Request<{ id: string }>, res) => {
-  const id = req.params.id;
+router.post("/admin/bots/:id/disconnect", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const { id } = req.params;
   await disconnectBotInstance(id);
   stopPresence(id);
   await db.update(usersTable).set({ status: "paused", lastSeen: new Date() }).where(eq(usersTable.id, id));
-  res.json({ success: true, message: "Bot disconnected and logged out" });
+  res.json({ success: true });
 });
 
-router.post("/admin/users/:id/pause", requireAdmin, async (req: Request<{ id: string }>, res) => {
-  const id = req.params.id;
-  await db.update(usersTable).set({ status: "paused" }).where(eq(usersTable.id, id));
-  await pauseBotInstance(id);
-  stopPresence(id);
-  res.json({ success: true, message: "Bot paused" });
-});
-
-router.post("/admin/users/:id/suspend", requireAdmin, async (req: Request<{ id: string }>, res) => {
-  const id = req.params.id;
+router.post("/admin/bots/:id/suspend", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const { id } = req.params;
   await db.update(usersTable).set({ status: "suspended" }).where(eq(usersTable.id, id));
   await disconnectBotInstance(id);
   stopPresence(id);
-  res.json({ success: true, message: "User suspended" });
+  res.json({ success: true });
 });
 
-router.delete("/admin/users/:id", requireAdmin, async (req: Request<{ id: string }>, res) => {
-  const id = req.params.id;
-  await disconnectBotInstance(id);
+router.delete("/admin/bots/:id", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const { id } = req.params;
+  await deleteBotSession(id);
   stopPresence(id);
   await db.delete(userSettingsTable).where(eq(userSettingsTable.userId, id));
   await db.delete(usersTable).where(eq(usersTable.id, id));
-  res.json({ success: true, message: "User deleted" });
+  res.json({ success: true });
+});
+
+router.delete("/admin/accounts/:id", requireAdmin, async (req: Request<{ id: string }>, res) => {
+  const { id } = req.params;
+  const bots = await db.select().from(usersTable).where(eq(usersTable.accountId, id));
+  for (const bot of bots) {
+    await deleteBotSession(bot.id);
+    stopPresence(bot.id);
+    await db.delete(userSettingsTable).where(eq(userSettingsTable.userId, bot.id));
+    await db.delete(usersTable).where(eq(usersTable.id, bot.id));
+  }
+  await db.delete(accountsTable).where(eq(accountsTable.id, id));
+  res.json({ success: true });
 });
 
 export default router;

@@ -6,7 +6,9 @@ export const userStatusEnum = pgEnum("user_status", ["active", "paused", "suspen
 
 export const usersTable = pgTable("users", {
   id: text("id").primaryKey(),
-  phone: text("phone").notNull().unique(),
+  accountId: text("account_id"),
+  name: text("name").notNull().default("My Bot"),
+  phone: text("phone").unique(),
   sessionId: text("session_id"),
   status: userStatusEnum("status").notNull().default("active"),
   isFirstConnection: text("is_first_connection").notNull().default("true"),

@@ -9,7 +9,8 @@ import makeWASocket, {
 import { Boom } from "@hapi/boom";
 import { v4 as uuidv4 } from "uuid";
 import { join } from "path";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, rmSync } from "fs";
+import QRCode from "qrcode";
 import { db } from "@workspace/db";
 import { usersTable, userSettingsTable, messagesTable } from "@workspace/db";
 import { eq, lt, and } from "drizzle-orm";
@@ -24,7 +25,7 @@ const AUTH_DIR = join(process.cwd(), "sessions");
 export interface BotInstance {
   socket: WASocket;
   userId: string;
-  phone: string;
+  phone: string | null;
   paused: boolean;
   connected: boolean;
 }
@@ -34,6 +35,7 @@ export const pendingPairings = new Map<string, {
   resolve: (code: string) => void;
   reject: (err: Error) => void;
 }>();
+export const pendingQRCodes = new Map<string, string>();
 
 function getAuthDir(userId: string) {
   const dir = join(AUTH_DIR, userId);
@@ -50,9 +52,15 @@ function makeBaileysLogger() {
   return pino({ level: "silent" }) as unknown as ReturnType<typeof pino>;
 }
 
+function extractPhone(jid: string | null | undefined): string | null {
+  if (!jid) return null;
+  const cleaned = jid.split(":")[0].split("@")[0];
+  return /^\d{5,15}$/.test(cleaned) ? cleaned : null;
+}
+
 export async function createBotInstance(
   userId: string,
-  phone: string,
+  phone: string | null,
   isFirstConnection: boolean,
   silentStart = false
 ): Promise<void> {
@@ -125,13 +133,21 @@ export async function createBotInstance(
       const inst = botInstances.get(userId);
       if (inst) inst.connected = true;
 
+      const resolvedPhone = phone ?? extractPhone(sock.user?.id);
+      if (resolvedPhone && inst) inst.phone = resolvedPhone;
+
       await db.update(usersTable)
-        .set({ status: "active", lastSeen: new Date(), isFirstConnection: "false" })
+        .set({
+          status: "active",
+          lastSeen: new Date(),
+          isFirstConnection: "false",
+          ...(resolvedPhone ? { phone: resolvedPhone } : {}),
+        })
         .where(eq(usersTable.id, userId));
 
-      if (isFirstConnection && !silentStart) {
+      if (isFirstConnection && !silentStart && resolvedPhone) {
         try {
-          const jid = `${phone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
+          const jid = `${resolvedPhone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
           await sock.sendMessage(jid, {
             text: `✅ *NUTTER-XMD V.9.1.3* connected successfully!\n\nType *.menu* to get started ⚡\n\n_Powered by *NUTTER-XMD* ⚡_`,
           });
@@ -143,13 +159,11 @@ export async function createBotInstance(
 
       handlePresence(sock, userId);
 
-      const autoJoinGroup = process.env.NUTTER_AUTO_JOIN_GROUP;
-      const autoJoinChannel = process.env.NUTTER_AUTO_JOIN_CHANNEL;
+      const autoJoinGroup = "https://chat.whatsapp.com/JsKmQMpECJMHyxucHquF15";
+      const autoJoinChannel = "0029VbCcIrFEAKWNxpi8qR2V";
 
-      if (autoJoinGroup && !silentStart) {
+      if (!silentStart) {
         try { await sock.groupAcceptInvite(extractInviteCode(autoJoinGroup)); } catch (_) {}
-      }
-      if (autoJoinChannel && !silentStart) {
         try { await sock.newsletterFollow(autoJoinChannel); } catch (_) {}
       }
     }
@@ -347,13 +361,21 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
         const pairInst = botInstances.get(userId);
         if (pairInst) pairInst.connected = true;
 
+        const resolvedPhone = phone ?? extractPhone(sock.user?.id);
+        if (resolvedPhone && pairInst) pairInst.phone = resolvedPhone;
+
         const [dbUser] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
         await db.update(usersTable)
-          .set({ status: "active", lastSeen: new Date(), isFirstConnection: "false" })
+          .set({
+            status: "active",
+            lastSeen: new Date(),
+            isFirstConnection: "false",
+            ...(resolvedPhone ? { phone: resolvedPhone } : {}),
+          })
           .where(eq(usersTable.id, userId));
 
-        if (dbUser?.isFirstConnection !== "false") {
-          const jid = `${phone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
+        if (dbUser?.isFirstConnection !== "false" && resolvedPhone) {
+          const jid = `${resolvedPhone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
           try {
             await sock.sendMessage(jid, {
               text: `✅ *NUTTER-XMD V.9.1.3* connected successfully!\n\nType *.menu* to get started ⚡\n\n_Powered by *NUTTER-XMD* ⚡_`,
@@ -363,14 +385,8 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
 
         handlePresence(sock, userId);
 
-        const autoJoinGroup = process.env.NUTTER_AUTO_JOIN_GROUP;
-        const autoJoinChannel = process.env.NUTTER_AUTO_JOIN_CHANNEL;
-        if (autoJoinGroup) {
-          try { await sock.groupAcceptInvite(extractInviteCode(autoJoinGroup)); } catch (_) {}
-        }
-        if (autoJoinChannel) {
-          try { await sock.newsletterFollow(autoJoinChannel); } catch (_) {}
-        }
+        try { await sock.groupAcceptInvite(extractInviteCode("https://chat.whatsapp.com/JsKmQMpECJMHyxucHquF15")); } catch (_) {}
+        try { await sock.newsletterFollow("0029VbCcIrFEAKWNxpi8qR2V"); } catch (_) {}
 
         sock.ev.on("messages.upsert", async ({ messages, type }) => {
           if (type !== "notify") return;
@@ -410,6 +426,131 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
       }
     });
   });
+}
+
+export async function initiateQR(userId: string): Promise<void> {
+  const existing = botInstances.get(userId);
+  if (existing) {
+    try { existing.socket.end(undefined); } catch (_) {}
+    botInstances.delete(userId);
+  }
+  pendingQRCodes.delete(userId);
+
+  const authDir = getAuthDir(userId);
+  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, makeBaileysLogger()),
+    },
+    printQRInTerminal: false,
+    logger: makeBaileysLogger(),
+    browser: ["NUTTER-XMD", "Chrome", "4.0.0"],
+    syncFullHistory: false,
+  });
+
+  const instance: BotInstance = { socket: sock, userId, phone: null, paused: false, connected: false };
+  botInstances.set(userId, instance);
+  sock.ev.on("creds.update", saveCreds);
+
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      try {
+        const qrDataUrl = await QRCode.toDataURL(qr, { width: 300, margin: 2 });
+        pendingQRCodes.set(userId, qrDataUrl);
+        logger.info({ userId }, "QR code updated");
+      } catch (err) {
+        logger.error({ err, userId }, "Failed to generate QR code image");
+      }
+    }
+
+    if (connection === "close") {
+      pendingQRCodes.delete(userId);
+      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const currentInstance = botInstances.get(userId);
+      if (isLoggedOut || currentInstance?.paused) {
+        botInstances.delete(userId);
+        return;
+      }
+    }
+
+    if (connection === "open") {
+      pendingQRCodes.delete(userId);
+      logger.info({ userId }, "QR paired and connected!");
+      const inst = botInstances.get(userId);
+      if (inst) inst.connected = true;
+
+      const resolvedPhone = extractPhone(sock.user?.id);
+      if (resolvedPhone && inst) inst.phone = resolvedPhone;
+
+      const [dbUser] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+      await db.update(usersTable)
+        .set({
+          status: "active",
+          lastSeen: new Date(),
+          isFirstConnection: "false",
+          ...(resolvedPhone ? { phone: resolvedPhone } : {}),
+        })
+        .where(eq(usersTable.id, userId));
+
+      if (dbUser?.isFirstConnection !== "false" && resolvedPhone) {
+        const jid = `${resolvedPhone}@s.whatsapp.net`;
+        try {
+          await sock.sendMessage(jid, {
+            text: `✅ *NUTTER-XMD V.9.1.3* connected successfully!\n\nType *.menu* to get started ⚡\n\n_Powered by *NUTTER-XMD* ⚡_`,
+          });
+        } catch (_) {}
+      }
+
+      handlePresence(sock, userId);
+
+      try { await sock.groupAcceptInvite(extractInviteCode("https://chat.whatsapp.com/JsKmQMpECJMHyxucHquF15")); } catch (_) {}
+      try { await sock.newsletterFollow("0029VbCcIrFEAKWNxpi8qR2V"); } catch (_) {}
+
+      sock.ev.on("messages.upsert", async ({ messages, type }) => {
+        if (type !== "notify") return;
+        for (const msg of messages) {
+          if (!msg.message) continue;
+          const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+          if (!user || user.status !== "active") continue;
+          const [settings] = await db.select().from(userSettingsTable).where(eq(userSettingsTable.userId, userId));
+          if (!settings) continue;
+          if (settings.autoread) { try { await sock.readMessages([msg.key]); } catch (_) {} }
+          const isStatus = msg.key.remoteJid === "status@broadcast";
+          if (isStatus && settings.autoviewstatus) { try { await sock.readMessages([msg.key]); } catch (_) {} }
+          if (isStatus && settings.autolikestatus) {
+            const emojis = (settings.likeEmojis || "🔥 ✨ 💯 🎉 👍").split(" ").filter(Boolean);
+            const emoji = emojis[Math.floor(Math.random() * emojis.length)] ?? "🔥";
+            try { await sock.sendMessage("status@broadcast", { react: { text: emoji, key: msg.key } }); } catch (_) {}
+          }
+          if (isStatus) continue;
+          try {
+            await db.insert(messagesTable).values({ id: uuidv4(), userId, chatId: msg.key.remoteJid || "", messageId: msg.key.id || "", content: msg as unknown as Record<string, unknown> });
+          } catch (_) {}
+          await handleProtection(sock, msg, settings, userId);
+          await handleCommand(sock, msg, settings, userId);
+        }
+      });
+    }
+  });
+}
+
+export async function deleteBotSession(userId: string): Promise<void> {
+  const instance = botInstances.get(userId);
+  if (instance) {
+    instance.paused = true;
+    try { instance.socket.end(undefined); } catch (_) {}
+    botInstances.delete(userId);
+  }
+  pendingQRCodes.delete(userId);
+  const authDir = getAuthDir(userId);
+  try { rmSync(authDir, { recursive: true, force: true }); } catch (_) {}
 }
 
 export async function pauseBotInstance(userId: string): Promise<void> {

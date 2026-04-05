@@ -15,8 +15,8 @@ const FEATURES = [
   },
   {
     icon: "🔗",
-    title: "Phone Number Pairing",
-    desc: "No QR scan needed. Generate an 8-digit code and link your WhatsApp in seconds.",
+    title: "Flexible Linking",
+    desc: "Link via QR code scan or 8-digit pairing code — whichever works best for you.",
     color: "#22c55e",
   },
   {
@@ -45,17 +45,17 @@ const FEATURES = [
   },
   {
     icon: "🔐",
-    title: "Multi-User Platform",
-    desc: "Each user gets their own isolated bot session. Admin panel to manage all users and sessions.",
+    title: "Multi-Bot Support",
+    desc: "Add up to 2 bots per account. Name them, configure each one independently, switch with ease.",
     color: "#ef4444",
   },
 ];
 
 const STEPS = [
-  { num: "01", title: "Enter Your Number", desc: "Type your WhatsApp number with country code (e.g. 2349012345678)." },
-  { num: "02", title: "Get Pairing Code", desc: "We generate an 8-digit code via Baileys. Code expires in 3 minutes." },
-  { num: "03", title: "Link in WhatsApp", desc: "Go to WhatsApp → Settings → Linked Devices → Link with Phone Number → Enter code." },
-  { num: "04", title: "Configure & Go", desc: "Toggle features, set your prefix, and let NUTTER-XMD run your chats." },
+  { num: "01", title: "Create Account", desc: "Register with your email, username, and password. Free, instant access." },
+  { num: "02", title: "Add Your Bot", desc: "Name your bot and choose to link via QR code or 8-digit pairing code." },
+  { num: "03", title: "Link WhatsApp", desc: "Scan QR in WhatsApp → Linked Devices, or enter the pairing code in seconds." },
+  { num: "04", title: "Configure & Go", desc: "Toggle 15+ features, set your prefix, and let NUTTER-XMD automate your chats." },
 ];
 
 export default function Landing() {
@@ -93,7 +93,7 @@ export default function Landing() {
             style={{ color: "#94a3b8", fontSize: "0.875rem", textDecoration: "none", padding: "0.4rem 0.75rem" }}
           >Channel</a>
           <button
-            onClick={() => navigate("/connect")}
+            onClick={() => navigate("/register")}
             style={{
               background: "linear-gradient(135deg, #00d4ff, #a855f7)",
               color: "white", fontWeight: 700, border: "none",
@@ -153,7 +153,7 @@ export default function Landing() {
 
         <div style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap" }}>
           <button
-            onClick={() => navigate("/connect")}
+            onClick={() => navigate("/register")}
             style={{
               background: "linear-gradient(135deg, #00d4ff, #a855f7)",
               color: "white", fontWeight: 800, border: "none",
@@ -257,7 +257,7 @@ export default function Landing() {
             <h2 style={{ fontSize: "clamp(1.75rem, 4vw, 2.5rem)", fontWeight: 800, color: "#e2e8f0", marginBottom: "0.75rem" }}>
               Up in 60 Seconds
             </h2>
-            <p style={{ color: "#64748b" }}>No QR code. No app install. Just a phone number.</p>
+            <p style={{ color: "#64748b" }}>QR code or pairing code. No app install. Just WhatsApp.</p>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "1.5rem" }}>
@@ -353,7 +353,7 @@ export default function Landing() {
           Connect in under a minute. Free. No app needed.
         </p>
         <button
-          onClick={() => navigate("/connect")}
+          onClick={() => navigate("/register")}
           style={{
             background: "linear-gradient(135deg, #00d4ff, #a855f7)",
             color: "white", fontWeight: 800, border: "none",
@@ -362,7 +362,7 @@ export default function Landing() {
             boxShadow: "0 0 40px rgba(168,85,247,0.3)"
           }}
         >
-          ⚡ Connect Your Bot Free
+          ⚡ Get Started Free
         </button>
       </section>
 

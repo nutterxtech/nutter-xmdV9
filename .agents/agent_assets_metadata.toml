@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "WRNniAcSxJBXTpfETt_NK"
+uri = "file://artifacts/api-server/public/menu-image.png"
+type = "image"
+title = "generated_image"

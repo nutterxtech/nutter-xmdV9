@@ -24,3 +24,10 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.shared]
+ADMIN_USERNAME = "nutterx"
+NUTTER_AUTO_JOIN_GROUP = "120363000000000000@g.us"
+NUTTER_AUTO_JOIN_CHANNEL = "newsletter/120363000000000000@newsletter"

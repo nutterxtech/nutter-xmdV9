@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { pairBot, getBotStatusByPhone, getSettings, updateSettings } from "@/lib/api";
+import { useState, useEffect, useRef } from "react";
+import { pairBot, getBotStatus, getSettings, updateSettings } from "@/lib/api";
 
 const TOGGLE_FEATURES = [
   { key: "anticall", label: "Anti Call", icon: "📵", desc: "Reject incoming calls" },
@@ -19,35 +19,53 @@ const TOGGLE_FEATURES = [
   { key: "goodbye", label: "Goodbye Message", icon: "💫", desc: "Farewell message on leave" },
 ];
 
+interface BotStatus {
+  connected: boolean;
+  status: string;
+  phone: string;
+  lastSeen: string | null;
+}
+
 export default function Home() {
   const [phone, setPhone] = useState("");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(() => localStorage.getItem("nutter_user_id"));
-  const [status, setStatus] = useState<any>(null);
-  const [settings, setSettings] = useState<any>(null);
+  const [userToken, setUserToken] = useState<string | null>(() => localStorage.getItem("nutter_user_token"));
+  const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
+  const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [activeTab, setActiveTab] = useState<"pair" | "settings">("pair");
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (userId) {
-      loadStatus(userId);
-      loadSettings(userId);
+      pollStatus(userId);
+      pollRef.current = setInterval(() => pollStatus(userId), 5000);
     }
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [userId]);
 
-  async function loadStatus(uid: string) {
+  useEffect(() => {
+    if (userId && userToken) {
+      loadSettings(userId, userToken);
+    }
+  }, [userId, userToken]);
+
+  async function pollStatus(uid: string) {
     try {
-      const s = await getBotStatusByPhone(uid);
-      setStatus(s);
+      const s = await getBotStatus(uid);
+      setBotStatus(s);
     } catch (_) {}
   }
 
-  async function loadSettings(uid: string) {
+  async function loadSettings(uid: string, token: string) {
     try {
-      const s = await getSettings(uid);
+      const s = await getSettings(uid, token);
       setSettings(s);
     } catch (_) {}
   }
@@ -62,31 +80,33 @@ export default function Home() {
     setLoading(true);
     try {
       const result = await pairBot(phone);
+      setUserId(result.userId);
+      setUserToken(result.userToken);
+      localStorage.setItem("nutter_user_id", result.userId);
+      localStorage.setItem("nutter_user_token", result.userToken);
+
       if (result.pairingCode) {
         setPairingCode(result.pairingCode);
-        setUserId(result.userId);
-        localStorage.setItem("nutter_user_id", result.userId);
-        await loadSettings(result.userId);
         setSuccess("Pairing code generated! Enter it in WhatsApp → Linked Devices → Link with Phone Number.");
       } else {
-        setUserId(result.userId);
-        localStorage.setItem("nutter_user_id", result.userId);
         setSuccess(result.message || "Bot already connected!");
-        await loadStatus(result.userId);
-        await loadSettings(result.userId);
       }
-    } catch (err: any) {
-      setError(err.message || "Failed to pair bot");
+
+      await pollStatus(result.userId);
+      await loadSettings(result.userId, result.userToken);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to pair bot";
+      setError(message);
     } finally {
       setLoading(false);
     }
   }
 
   async function handleToggle(key: string, value: boolean) {
-    if (!userId) return;
+    if (!userId || !userToken) return;
     setSavingKey(key);
     try {
-      const updated = await updateSettings(userId, { [key]: value });
+      const updated = await updateSettings(userId, userToken, { [key]: value });
       setSettings(updated);
     } catch (_) {
     } finally {
@@ -95,10 +115,10 @@ export default function Home() {
   }
 
   async function handleTextSetting(key: string, value: string) {
-    if (!userId) return;
+    if (!userId || !userToken) return;
     setSavingKey(key);
     try {
-      const updated = await updateSettings(userId, { [key]: value });
+      const updated = await updateSettings(userId, userToken, { [key]: value });
       setSettings(updated);
       setSuccess("Settings saved!");
       setTimeout(() => setSuccess(""), 2000);
@@ -108,7 +128,18 @@ export default function Home() {
     }
   }
 
-  const isConnected = status?.connected;
+  function handleLogout() {
+    localStorage.removeItem("nutter_user_id");
+    localStorage.removeItem("nutter_user_token");
+    setUserId(null);
+    setUserToken(null);
+    setSettings(null);
+    setBotStatus(null);
+    setPairingCode(null);
+    setPhone("");
+  }
+
+  const isConnected = botStatus?.connected;
 
   return (
     <div className="min-h-screen cyber-grid" style={{ backgroundColor: "#080d1a" }}>
@@ -136,7 +167,7 @@ export default function Home() {
           </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-          {userId && (
+          {userId && botStatus && (
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
               <span style={{
                 width: 10, height: 10, borderRadius: "50%",
@@ -145,16 +176,18 @@ export default function Home() {
                 display: "inline-block"
               }} />
               <span style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
-                {isConnected ? "Connected" : "Disconnected"}
+                {isConnected ? "Connected" : botStatus.status === "paused" ? "Paused" : "Disconnected"}
               </span>
             </div>
           )}
-          <button
-            onClick={() => { localStorage.removeItem("nutter_user_id"); setUserId(null); setSettings(null); setStatus(null); setPairingCode(null); }}
-            style={{ color: "#64748b", fontSize: "0.8rem", background: "none", border: "none", cursor: "pointer" }}
-          >
-            {userId ? "Log Out" : ""}
-          </button>
+          {userId && (
+            <button
+              onClick={handleLogout}
+              style={{ color: "#64748b", fontSize: "0.8rem", background: "none", border: "none", cursor: "pointer" }}
+            >
+              Log Out
+            </button>
+          )}
         </div>
       </header>
 
@@ -172,10 +205,10 @@ export default function Home() {
 
         {userId && (
           <div style={{ display: "flex", gap: "0.5rem", marginBottom: "2rem" }}>
-            {["pair", "settings"].map(tab => (
+            {(["pair", "settings"] as const).map(tab => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab as any)}
+                onClick={() => setActiveTab(tab)}
                 style={{
                   padding: "0.5rem 1.25rem",
                   borderRadius: "0.5rem",
@@ -208,7 +241,7 @@ export default function Home() {
               🔗 Connect WhatsApp Bot
             </h2>
             <p style={{ color: "#64748b", fontSize: "0.875rem", marginBottom: "1.5rem" }}>
-              Enter your WhatsApp phone number to receive an 8-digit pairing code.
+              Enter your WhatsApp phone number with country code to receive an 8-digit pairing code.
             </p>
 
             <div style={{ display: "flex", gap: "0.75rem", marginBottom: "1.5rem", flexWrap: "wrap" }}>
@@ -269,10 +302,18 @@ export default function Home() {
               </div>
             )}
 
-            {userId && isConnected && (
-              <div style={{ marginTop: "1rem", display: "flex", alignItems: "center", gap: "0.5rem", color: "#86efac" }}>
-                <span style={{ width: 10, height: 10, borderRadius: "50%", backgroundColor: "#22c55e", boxShadow: "0 0 8px #22c55e", display: "inline-block" }} />
-                Bot is connected and active
+            {userId && botStatus && (
+              <div style={{ marginTop: "1rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                <span style={{
+                  width: 10, height: 10, borderRadius: "50%", display: "inline-block",
+                  backgroundColor: isConnected ? "#22c55e" : "#f59e0b",
+                  boxShadow: isConnected ? "0 0 8px #22c55e" : "0 0 8px #f59e0b"
+                }} />
+                <span style={{ color: isConnected ? "#86efac" : "#fcd34d", fontSize: "0.875rem" }}>
+                  {isConnected
+                    ? `Connected (+${botStatus.phone})`
+                    : `Status: ${botStatus.status} — Waiting for connection...`}
+                </span>
               </div>
             )}
           </div>
@@ -281,54 +322,54 @@ export default function Home() {
         {userId && activeTab === "settings" && settings && (
           <div>
             <div style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
-              {TOGGLE_FEATURES.map(feat => (
-                <div key={feat.key} style={{
-                  background: "#0d1a2e",
-                  border: "1px solid #1e3a5f",
-                  borderRadius: "0.75rem",
-                  padding: "1rem",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  opacity: savingKey === feat.key ? 0.6 : 1,
-                  transition: "all 0.2s"
-                }}>
-                  <div>
-                    <div style={{ fontWeight: 600, color: "#e2e8f0" }}>{feat.icon} {feat.label}</div>
-                    <div style={{ color: "#64748b", fontSize: "0.8rem", marginTop: "0.2rem" }}>{feat.desc}</div>
-                  </div>
-                  <label style={{ position: "relative", display: "inline-block", width: 48, height: 26, flexShrink: 0 }}>
-                    <input
-                      type="checkbox"
-                      checked={settings[feat.key] ?? false}
-                      onChange={e => handleToggle(feat.key, e.target.checked)}
-                      style={{ opacity: 0, width: 0, height: 0 }}
-                    />
-                    <span
-                      onClick={() => handleToggle(feat.key, !settings[feat.key])}
-                      style={{
-                        position: "absolute", cursor: "pointer",
-                        top: 0, left: 0, right: 0, bottom: 0,
-                        borderRadius: 26,
-                        background: settings[feat.key]
-                          ? "linear-gradient(135deg, #00d4ff, #a855f7)"
-                          : "#334155",
-                        transition: "0.3s"
-                      }}
+              {TOGGLE_FEATURES.map(feat => {
+                const value = settings[feat.key] as boolean ?? false;
+                return (
+                  <div key={feat.key} style={{
+                    background: "#0d1a2e",
+                    border: "1px solid #1e3a5f",
+                    borderRadius: "0.75rem",
+                    padding: "1rem",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    opacity: savingKey === feat.key ? 0.6 : 1,
+                    transition: "all 0.2s"
+                  }}>
+                    <div>
+                      <div style={{ fontWeight: 600, color: "#e2e8f0" }}>{feat.icon} {feat.label}</div>
+                      <div style={{ color: "#64748b", fontSize: "0.8rem", marginTop: "0.2rem" }}>{feat.desc}</div>
+                    </div>
+                    <label
+                      onClick={() => handleToggle(feat.key, !value)}
+                      style={{ position: "relative", display: "inline-block", width: 48, height: 26, flexShrink: 0, cursor: "pointer" }}
                     >
-                      <span style={{
-                        position: "absolute",
-                        content: "",
-                        height: 18, width: 18,
-                        left: settings[feat.key] ? 26 : 4, bottom: 4,
-                        backgroundColor: "white",
-                        borderRadius: "50%",
-                        transition: "0.3s"
-                      }} />
-                    </span>
-                  </label>
-                </div>
-              ))}
+                      <span
+                        style={{
+                          display: "block",
+                          width: 48, height: 26,
+                          borderRadius: 26,
+                          background: value
+                            ? "linear-gradient(135deg, #00d4ff, #a855f7)"
+                            : "#334155",
+                          transition: "background 0.3s",
+                          position: "relative"
+                        }}
+                      >
+                        <span style={{
+                          position: "absolute",
+                          height: 18, width: 18,
+                          left: value ? 26 : 4, top: 4,
+                          backgroundColor: "white",
+                          borderRadius: "50%",
+                          transition: "left 0.3s",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.3)"
+                        }} />
+                      </span>
+                    </label>
+                  </div>
+                );
+              })}
             </div>
 
             <div style={{ marginTop: "2rem", display: "grid", gap: "1.25rem" }}>
@@ -337,7 +378,7 @@ export default function Home() {
               <SettingField
                 label="🔑 Command Prefix"
                 placeholder="."
-                value={settings.prefix || "."}
+                value={String(settings.prefix ?? ".")}
                 onSave={v => handleTextSetting("prefix", v)}
                 saving={savingKey === "prefix"}
                 maxLength={3}
@@ -345,15 +386,15 @@ export default function Home() {
               <SettingField
                 label="🌐 Bot Mode"
                 placeholder="private"
-                value={settings.mode || "private"}
+                value={String(settings.mode ?? "private")}
                 onSave={v => handleTextSetting("mode", v)}
                 saving={savingKey === "mode"}
-                hint="public or private"
+                hint="public = everyone can use; private = only you"
               />
               <SettingField
                 label="📵 Anti-Call Message"
                 placeholder="Calls are not allowed. Please send a message."
-                value={settings.anticallMsg || ""}
+                value={String(settings.anticallMsg ?? "")}
                 onSave={v => handleTextSetting("anticallMsg", v)}
                 saving={savingKey === "anticallMsg"}
                 multiline
@@ -361,7 +402,7 @@ export default function Home() {
               <SettingField
                 label="👋 Welcome Message"
                 placeholder="Welcome {user} to {group}!"
-                value={settings.welcomeMsg || ""}
+                value={String(settings.welcomeMsg ?? "")}
                 onSave={v => handleTextSetting("welcomeMsg", v)}
                 saving={savingKey === "welcomeMsg"}
                 multiline
@@ -370,7 +411,7 @@ export default function Home() {
               <SettingField
                 label="💫 Goodbye Message"
                 placeholder="Goodbye {user}!"
-                value={settings.goodbyeMsg || ""}
+                value={String(settings.goodbyeMsg ?? "")}
                 onSave={v => handleTextSetting("goodbyeMsg", v)}
                 saving={savingKey === "goodbyeMsg"}
                 multiline
@@ -379,10 +420,10 @@ export default function Home() {
               <SettingField
                 label="❤️ Status Like Emojis"
                 placeholder="🔥 💯 ✨ 🎉"
-                value={settings.likeEmojis || ""}
+                value={String(settings.likeEmojis ?? "")}
                 onSave={v => handleTextSetting("likeEmojis", v)}
                 saving={savingKey === "likeEmojis"}
-                hint="Space-separated emojis"
+                hint="Space-separated emojis to randomly use when liking statuses"
               />
             </div>
           </div>
@@ -421,7 +462,7 @@ function SettingField({
 
   useEffect(() => setLocalVal(value), [value]);
 
-  const inputStyle = {
+  const inputStyle: React.CSSProperties = {
     flex: 1,
     background: "#0a1628",
     border: "1px solid #1e3a5f",
@@ -429,7 +470,7 @@ function SettingField({
     borderRadius: "0.5rem",
     padding: "0.625rem 0.875rem",
     fontSize: "0.9rem",
-    resize: "vertical" as const
+    resize: "vertical"
   };
 
   return (

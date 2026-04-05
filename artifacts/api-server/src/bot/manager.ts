@@ -5,20 +5,19 @@ import makeWASocket, {
   makeCacheableSignalKeyStore,
   proto,
   WASocket,
-  BaileysEventMap,
 } from "@whiskeysockets/baileys";
 import { Boom } from "@hapi/boom";
 import { v4 as uuidv4 } from "uuid";
 import { join } from "path";
 import { existsSync, mkdirSync } from "fs";
 import { db } from "@workspace/db";
-import { usersTable, userSettingsTable } from "@workspace/db";
+import { usersTable, userSettingsTable, messagesTable } from "@workspace/db";
 import { eq, lt } from "drizzle-orm";
-import { messagesTable } from "@workspace/db";
-import { logger } from "../lib/logger";
+import { logger } from "../lib/logger.js";
 import { handleCommand } from "./commands/index.js";
 import { handleProtection } from "./protection.js";
 import { handlePresence } from "./presence.js";
+import pino from "pino";
 
 const AUTH_DIR = join(process.cwd(), "sessions");
 
@@ -26,7 +25,7 @@ export interface BotInstance {
   socket: WASocket;
   userId: string;
   phone: string;
-  isFirstConnection: boolean;
+  paused: boolean;
 }
 
 export const botInstances = new Map<string, BotInstance>();
@@ -41,12 +40,22 @@ function getAuthDir(userId: string) {
   return dir;
 }
 
+function makeBaileysLogger() {
+  return pino({ level: "silent" }) as unknown as ReturnType<typeof pino>;
+}
+
 export async function createBotInstance(
   userId: string,
   phone: string,
   isFirstConnection: boolean,
   silentStart = false
 ): Promise<void> {
+  const existing = botInstances.get(userId);
+  if (existing && !existing.paused) {
+    logger.info({ userId }, "Bot instance already active, skipping");
+    return;
+  }
+
   const authDir = getAuthDir(userId);
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
   const { version } = await fetchLatestBaileysVersion();
@@ -55,46 +64,42 @@ export async function createBotInstance(
     version,
     auth: {
       creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger as any),
+      keys: makeCacheableSignalKeyStore(state.keys, makeBaileysLogger()),
     },
     printQRInTerminal: false,
-    logger: logger as any,
+    logger: makeBaileysLogger(),
     browser: ["NUTTER-XMD", "Chrome", "4.0.0"],
     generateHighQualityLinkPreview: true,
     syncFullHistory: false,
   });
 
-  const instance: BotInstance = { socket: sock, userId, phone, isFirstConnection };
+  const instance: BotInstance = { socket: sock, userId, phone, paused: false };
   botInstances.set(userId, instance);
 
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr, pairingCode } = update;
-
-    if (pairingCode) {
-      logger.info({ userId, pairingCode }, "Pairing code generated");
-      const pending = pendingPairings.get(userId);
-      if (pending) {
-        pending.resolve(pairingCode);
-        pendingPairings.delete(userId);
-      }
-    }
+    const { connection, lastDisconnect } = update;
 
     if (connection === "close") {
-      const shouldReconnect =
-        (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+      const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const currentInstance = botInstances.get(userId);
+      const isPaused = currentInstance?.paused ?? false;
 
-      if (shouldReconnect) {
-        logger.info({ userId }, "Reconnecting bot...");
-        setTimeout(() => createBotInstance(userId, phone, false, true), 5000);
-      } else {
-        logger.info({ userId }, "Bot logged out");
+      if (isLoggedOut || isPaused) {
+        logger.info({ userId, isLoggedOut, isPaused }, "Bot not reconnecting");
         botInstances.delete(userId);
-        await db.update(usersTable)
-          .set({ status: "paused", lastSeen: new Date() })
-          .where(eq(usersTable.id, userId));
+        if (isLoggedOut) {
+          await db.update(usersTable)
+            .set({ status: "paused", lastSeen: new Date() })
+            .where(eq(usersTable.id, userId));
+        }
+        return;
       }
+
+      logger.info({ userId }, "Reconnecting bot...");
+      setTimeout(() => createBotInstance(userId, phone, false, true), 5000);
     }
 
     if (connection === "open") {
@@ -104,9 +109,9 @@ export async function createBotInstance(
         .set({ status: "active", lastSeen: new Date(), isFirstConnection: "false" })
         .where(eq(usersTable.id, userId));
 
-      if (instance.isFirstConnection && !silentStart) {
+      if (isFirstConnection && !silentStart) {
         try {
-          const jid = `${phone}@s.whatsapp.net`;
+          const jid = `${phone.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
           await sock.sendMessage(jid, {
             text: `✅ *NUTTER-XMD V.9.1.3* connected successfully!\n\nType *.menu* to get started ⚡\n\n_Powered by *NUTTER-XMD* ⚡_`,
           });
@@ -116,22 +121,16 @@ export async function createBotInstance(
         }
       }
 
-      instance.isFirstConnection = false;
-
       handlePresence(sock, userId);
 
       const autoJoinGroup = process.env.NUTTER_AUTO_JOIN_GROUP;
       const autoJoinChannel = process.env.NUTTER_AUTO_JOIN_CHANNEL;
 
       if (autoJoinGroup && !silentStart) {
-        try {
-          await sock.groupAcceptInvite(autoJoinGroup);
-        } catch (_) {}
+        try { await sock.groupAcceptInvite(autoJoinGroup); } catch (_) {}
       }
       if (autoJoinChannel && !silentStart) {
-        try {
-          await sock.newsletterFollow(autoJoinChannel);
-        } catch (_) {}
+        try { await sock.newsletterFollow(autoJoinChannel); } catch (_) {}
       }
     }
   });
@@ -140,28 +139,22 @@ export async function createBotInstance(
     if (type !== "notify") return;
     for (const msg of messages) {
       if (!msg.message) continue;
-
       const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
       if (!user || user.status !== "active") continue;
-
       const [settings] = await db.select().from(userSettingsTable).where(eq(userSettingsTable.userId, userId));
       if (!settings) continue;
 
       if (settings.autoread) {
-        try {
-          await sock.readMessages([msg.key]);
-        } catch (_) {}
+        try { await sock.readMessages([msg.key]); } catch (_) {}
       }
 
-      const msgId = uuidv4();
-      const chatId = msg.key.remoteJid || "";
       try {
         await db.insert(messagesTable).values({
-          id: msgId,
+          id: uuidv4(),
           userId,
-          chatId,
+          chatId: msg.key.remoteJid || "",
           messageId: msg.key.id || "",
-          content: msg as any,
+          content: msg as unknown as Record<string, unknown>,
         });
       } catch (_) {}
 
@@ -196,7 +189,7 @@ export async function createBotInstance(
           text: `🔄 *Anti-Delete*\n\n*From:* @${senderJid.split("@")[0]}\n*Deleted message recovered:*`,
           mentions: [senderJid],
         });
-        await sock.sendMessage(chatJid, originalMsg.message as any);
+        await sock.sendMessage(chatJid, { forward: originalMsg });
       } catch (_) {}
     }
   });
@@ -209,16 +202,10 @@ export async function createBotInstance(
       if (call.status === "offer") {
         try {
           await sock.rejectCall(call.id, call.from);
-          const msg = settings.anticallMsg || "📵 Calls are not allowed.";
-          await sock.sendMessage(call.from, { text: msg });
+          const callMsg = settings.anticallMsg || "📵 Calls are not allowed.";
+          await sock.sendMessage(call.from, { text: callMsg });
         } catch (_) {}
       }
-    }
-  });
-
-  sock.ev.on("groups.update", async (updates) => {
-    for (const update of updates) {
-      logger.info({ update }, "Group updated");
     }
   });
 
@@ -232,7 +219,6 @@ export async function createBotInstance(
     const botJid = sock.user?.id || "";
     const botParticipant = groupMeta.participants.find(p => p.id === botJid);
     const isBotAdmin = botParticipant?.admin === "admin" || botParticipant?.admin === "superadmin";
-
     if (!isBotAdmin) return;
 
     for (const participant of participants) {
@@ -240,38 +226,16 @@ export async function createBotInstance(
       const groupName = groupMeta.subject;
 
       if (action === "add" && settings.welcome) {
-        const msg = (settings.welcomeMsg || "👋 Welcome {user} to {group}!")
+        const welcomeMsg = (settings.welcomeMsg || "👋 Welcome {user} to {group}!")
           .replace("{user}", `@${name}`)
           .replace("{group}", groupName);
-        await sock.sendMessage(groupJid, { text: msg, mentions: [participant] }).catch(() => {});
+        await sock.sendMessage(groupJid, { text: welcomeMsg, mentions: [participant] }).catch(() => {});
       }
       if (action === "remove" && settings.goodbye) {
-        const msg = (settings.goodbyeMsg || "👋 Goodbye {user}!")
+        const goodbyeMsg = (settings.goodbyeMsg || "👋 Goodbye {user}!")
           .replace("{user}", `@${name}`)
           .replace("{group}", groupName);
-        await sock.sendMessage(groupJid, { text: msg, mentions: [participant] }).catch(() => {});
-      }
-    }
-  });
-
-  sock.ev.on("status.update" as any, async (statuses: any[]) => {
-    const [settings] = await db.select().from(userSettingsTable).where(eq(userSettingsTable.userId, userId));
-    if (!settings) return;
-
-    for (const status of statuses) {
-      if (settings.autoviewstatus) {
-        try {
-          await sock.readMessages([{ remoteJid: "status@broadcast", id: status.id, participant: status.from }]);
-        } catch (_) {}
-      }
-      if (settings.autolikestatus) {
-        try {
-          const emojis = settings.likeEmojis.split(" ").filter(Boolean);
-          const emoji = emojis[Math.floor(Math.random() * emojis.length)] || "❤️";
-          await (sock as any).sendMessage("status@broadcast", {
-            react: { text: emoji, key: { remoteJid: "status@broadcast", id: status.id, participant: status.from } },
-          });
-        } catch (_) {}
+        await sock.sendMessage(groupJid, { text: goodbyeMsg, mentions: [participant] }).catch(() => {});
       }
     }
   });
@@ -287,15 +251,15 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
       version,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger as any),
+        keys: makeCacheableSignalKeyStore(state.keys, makeBaileysLogger()),
       },
       printQRInTerminal: false,
-      logger: logger as any,
+      logger: makeBaileysLogger(),
       browser: ["NUTTER-XMD", "Chrome", "4.0.0"],
       syncFullHistory: false,
     });
 
-    const instance: BotInstance = { socket: sock, userId, phone, isFirstConnection: true };
+    const instance: BotInstance = { socket: sock, userId, phone, paused: false };
     botInstances.set(userId, instance);
     sock.ev.on("creds.update", saveCreds);
 
@@ -325,9 +289,12 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
       const { connection, lastDisconnect } = update;
 
       if (connection === "close") {
-        const shouldReconnect =
-          (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-        if (shouldReconnect) {
+        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+        const currentInstance = botInstances.get(userId);
+        const isPaused = currentInstance?.paused ?? false;
+
+        if (!isLoggedOut && !isPaused) {
           setTimeout(() => createBotInstance(userId, phone, true, false), 5000);
         }
       }
@@ -368,13 +335,12 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
             if (settings.autoread) {
               try { await sock.readMessages([msg.key]); } catch (_) {}
             }
-            const msgId = uuidv4();
-            const chatId = msg.key.remoteJid || "";
             try {
               await db.insert(messagesTable).values({
-                id: msgId, userId, chatId,
+                id: uuidv4(), userId,
+                chatId: msg.key.remoteJid || "",
                 messageId: msg.key.id || "",
-                content: msg as any,
+                content: msg as unknown as Record<string, unknown>,
               });
             } catch (_) {}
             await handleProtection(sock, msg, settings, userId);
@@ -384,6 +350,28 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
       }
     });
   });
+}
+
+export async function pauseBotInstance(userId: string): Promise<void> {
+  const instance = botInstances.get(userId);
+  if (instance) {
+    instance.paused = true;
+    try {
+      await instance.socket.ws.close();
+    } catch (_) {}
+    botInstances.delete(userId);
+  }
+}
+
+export async function disconnectBotInstance(userId: string): Promise<void> {
+  const instance = botInstances.get(userId);
+  if (instance) {
+    instance.paused = true;
+    try {
+      await instance.socket.logout();
+    } catch (_) {}
+    botInstances.delete(userId);
+  }
 }
 
 export async function restoreAllSessions(): Promise<void> {

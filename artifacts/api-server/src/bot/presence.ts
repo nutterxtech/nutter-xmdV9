@@ -29,5 +29,6 @@ export function stopPresence(userId: string): void {
   if (interval) {
     clearInterval(interval);
     presenceIntervals.delete(userId);
+    logger.info({ userId }, "Presence handler stopped");
   }
 }

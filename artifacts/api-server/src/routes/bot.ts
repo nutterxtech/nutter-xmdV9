@@ -46,16 +46,20 @@ router.post("/bot/pair", async (req, res) => {
 
   const existing = botInstances.get(user.id);
   if (existing) {
-    res.json({ pairingCode: null, userId: user.id, message: "Bot already connected" });
+    const userToken = Buffer.from(`${user.id}:${user.sessionId}`).toString("base64");
+    res.json({ pairingCode: null, userId: user.id, userToken, message: "Bot already connected" });
     return;
   }
 
   try {
     const code = await initiatePairing(user.id, cleanPhone);
     await db.update(usersTable).set({ linkedAt: new Date() }).where(eq(usersTable.id, user.id));
-    res.json({ pairingCode: code, userId: user.id });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message || "Failed to generate pairing code" });
+    const [updatedUser] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
+    const userToken = Buffer.from(`${user.id}:${updatedUser?.sessionId || user.sessionId}`).toString("base64");
+    res.json({ pairingCode: code, userId: user.id, userToken });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to generate pairing code";
+    res.status(500).json({ error: message });
   }
 });
 

@@ -23,7 +23,6 @@ export async function handleCommand(
   if (msg.key.fromMe) return;
 
   const sender = msg.key.participant || msg.key.remoteJid || "";
-  const isGroup = chatId.endsWith("@g.us");
 
   const messageText = msg.message?.conversation ||
     msg.message?.extendedTextMessage?.text ||
@@ -31,6 +30,8 @@ export async function handleCommand(
     msg.message?.videoMessage?.caption || "";
 
   const prefix = settings.prefix || ".";
+  const isGroup = chatId.endsWith("@g.us");
+
   if (!messageText.startsWith(prefix)) {
     if (settings.chatbot && !isGroup) {
       await sock.sendMessage(chatId, {
@@ -40,16 +41,20 @@ export async function handleCommand(
     return;
   }
 
-  if (settings.mode === "private" && !msg.key.fromMe && !sender.endsWith("@s.whatsapp.net")) {
-    const ownerPhone = (await sock.authState?.creds?.me?.id || "").split(":")[0];
-    if (!sender.includes(ownerPhone)) return;
+  if (settings.mode === "private") {
+    const ownerJid = sock.user?.id || "";
+    const ownerPhone = ownerJid.split(":")[0].split("@")[0];
+    const senderPhone = sender.split("@")[0];
+    if (senderPhone !== ownerPhone) {
+      return;
+    }
   }
 
   const parts = messageText.slice(prefix.length).trim().split(/\s+/);
   const command = parts[0].toLowerCase();
   const args = parts.slice(1);
 
-  logger.info({ command, args, chatId, sender }, "Command received");
+  logger.info({ command, chatId, sender }, "Command received");
 
   if (settings.autotype) {
     await sock.sendPresenceUpdate("composing", chatId).catch(() => {});

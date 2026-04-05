@@ -8,21 +8,21 @@ import {
 } from "@/lib/api";
 
 const TOGGLE_FEATURES = [
-  { key: "anticall", label: "Anti Call", icon: "📵", desc: "Reject incoming calls automatically", group: "Protection" },
-  { key: "antilink", label: "Anti Link", icon: "🔗", desc: "Remove links shared in groups", group: "Protection" },
-  { key: "antisticker", label: "Anti Sticker", icon: "🎭", desc: "Remove stickers in groups", group: "Protection" },
-  { key: "antitag", label: "Anti Tag", icon: "🏷️", desc: "Block mass-tag messages", group: "Protection" },
-  { key: "antibadword", label: "Anti Bad Word", icon: "🤬", desc: "Filter and remove offensive words", group: "Protection" },
-  { key: "antispam", label: "Anti Spam", icon: "🛡️", desc: "Kick spammers automatically", group: "Protection" },
-  { key: "antidelete", label: "Anti Delete", icon: "🔄", desc: "Recover deleted messages", group: "Protection" },
-  { key: "chatbot", label: "Auto Reply", icon: "🤖", desc: "Auto-reply to DMs when away", group: "Automation" },
-  { key: "autoread", label: "Auto Read", icon: "👁️", desc: "Auto-read all incoming messages", group: "Automation" },
-  { key: "alwaysonline", label: "Always Online", icon: "🟢", desc: "Stay always online on WhatsApp", group: "Automation" },
-  { key: "autoviewstatus", label: "Auto View Status", icon: "👀", desc: "Auto-view all status updates", group: "Automation" },
-  { key: "autolikestatus", label: "Auto Like Status", icon: "❤️", desc: "React to status updates", group: "Automation" },
-  { key: "autotype", label: "Typing Indicator", icon: "⌨️", desc: "Show typing when responding", group: "Automation" },
-  { key: "welcome", label: "Welcome Message", icon: "👋", desc: "Greet new group members", group: "Groups" },
-  { key: "goodbye", label: "Goodbye Message", icon: "💫", desc: "Farewell message on leave", group: "Groups" },
+  { key: "anticall", label: "Anti Call", icon: "📵", desc: "Reject incoming calls automatically", group: "Protection", actionKey: null },
+  { key: "antilink", label: "Anti Link", icon: "🔗", desc: "Delete messages with links in groups (bot must be admin)", group: "Protection", actionKey: "antilinkAction" },
+  { key: "antisticker", label: "Anti Sticker", icon: "🎭", desc: "Delete sticker messages in groups (bot must be admin)", group: "Protection", actionKey: "antistickerAction" },
+  { key: "antitag", label: "Anti Group Tag", icon: "🏷️", desc: "Delete messages containing WhatsApp group invite links", group: "Protection", actionKey: "antitagAction" },
+  { key: "antibadword", label: "Anti Bad Word", icon: "🤬", desc: "Delete messages with banned words (bot must be admin)", group: "Protection", actionKey: "antibadwordAction" },
+  { key: "antispam", label: "Anti Spam", icon: "🛡️", desc: "Warn & act on rapid message flooding (bot must be admin)", group: "Protection", actionKey: "antispamAction" },
+  { key: "antidelete", label: "Anti Delete", icon: "🔄", desc: "Recover deleted messages in groups", group: "Protection", actionKey: null },
+  { key: "chatbot", label: "Auto Reply", icon: "🤖", desc: "Auto-reply to DMs when away", group: "Automation", actionKey: null },
+  { key: "autoread", label: "Auto Read", icon: "👁️", desc: "Auto-read all incoming messages", group: "Automation", actionKey: null },
+  { key: "alwaysonline", label: "Always Online", icon: "🟢", desc: "Stay always online on WhatsApp", group: "Automation", actionKey: null },
+  { key: "autoviewstatus", label: "Auto View Status", icon: "👀", desc: "Auto-view all status updates", group: "Automation", actionKey: null },
+  { key: "autolikestatus", label: "Auto Like Status", icon: "❤️", desc: "React to status updates", group: "Automation", actionKey: null },
+  { key: "autotype", label: "Typing Indicator", icon: "⌨️", desc: "Show typing when responding", group: "Automation", actionKey: null },
+  { key: "welcome", label: "Welcome Message", icon: "👋", desc: "Greet new members (bot must be admin)", group: "Groups", actionKey: null },
+  { key: "goodbye", label: "Goodbye Message", icon: "💫", desc: "Farewell on leave (bot must be admin)", group: "Groups", actionKey: null },
 ];
 
 type LinkMode = "qr" | "pair" | null;
@@ -463,31 +463,56 @@ export default function Dashboard() {
                           <div style={{ display: "grid", gap: "0.65rem", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
                             {features.map(feat => {
                               const val = settings[feat.key] as boolean ?? false;
+                              const actionVal = feat.actionKey ? (settings[feat.actionKey] as string ?? "delete") : null;
+                              const isSaving = savingKey === feat.key || savingKey === feat.actionKey;
                               return (
                                 <div key={feat.key} style={{
-                                  background: C.card, border: `1px solid ${C.border}`,
+                                  background: C.card, border: `1px solid ${val && feat.actionKey ? "rgba(0,212,255,0.2)" : C.border}`,
                                   borderRadius: "0.875rem", padding: "0.9rem 1rem",
-                                  display: "flex", alignItems: "center", justifyContent: "space-between",
-                                  opacity: savingKey === feat.key ? 0.6 : 1, transition: "opacity 0.2s"
+                                  opacity: isSaving ? 0.6 : 1, transition: "opacity 0.2s, border-color 0.2s"
                                 }}>
-                                  <div>
-                                    <div style={{ fontWeight: 600, color: C.text, fontSize: "0.875rem" }}>{feat.icon} {feat.label}</div>
-                                    <div style={{ color: C.muted, fontSize: "0.75rem", marginTop: "0.1rem" }}>{feat.desc}</div>
+                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{ fontWeight: 600, color: C.text, fontSize: "0.875rem" }}>{feat.icon} {feat.label}</div>
+                                      <div style={{ color: C.muted, fontSize: "0.73rem", marginTop: "0.15rem", lineHeight: 1.4 }}>{feat.desc}</div>
+                                    </div>
+                                    <div
+                                      onClick={() => !savingKey && handleSettingsToggle(feat.key, !val)}
+                                      style={{
+                                        width: 44, height: 24, borderRadius: 24, flexShrink: 0,
+                                        background: val ? "linear-gradient(135deg, #00d4ff, #a855f7)" : C.border,
+                                        position: "relative", cursor: "pointer", transition: "background 0.3s", marginLeft: "0.75rem"
+                                      }}
+                                    >
+                                      <div style={{
+                                        position: "absolute", width: 16, height: 16, borderRadius: "50%",
+                                        backgroundColor: "white", top: 4, left: val ? 24 : 4,
+                                        transition: "left 0.3s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)"
+                                      }} />
+                                    </div>
                                   </div>
-                                  <div
-                                    onClick={() => !savingKey && handleSettingsToggle(feat.key, !val)}
-                                    style={{
-                                      width: 44, height: 24, borderRadius: 24, flexShrink: 0,
-                                      background: val ? "linear-gradient(135deg, #00d4ff, #a855f7)" : C.border,
-                                      position: "relative", cursor: "pointer", transition: "background 0.3s", marginLeft: "0.75rem"
-                                    }}
-                                  >
-                                    <div style={{
-                                      position: "absolute", width: 16, height: 16, borderRadius: "50%",
-                                      backgroundColor: "white", top: 4, left: val ? 24 : 4,
-                                      transition: "left 0.3s", boxShadow: "0 1px 3px rgba(0,0,0,0.3)"
-                                    }} />
-                                  </div>
+                                  {/* Action selector — only shown for protection features */}
+                                  {feat.actionKey && val && (
+                                    <div style={{ marginTop: "0.65rem", display: "flex", gap: "0.4rem" }}>
+                                      {[
+                                        { v: "delete", label: "🗑 Delete" },
+                                        { v: "delete_kick", label: "🚫 Delete + Kick" },
+                                      ].map(opt => (
+                                        <button
+                                          key={opt.v}
+                                          onClick={() => !savingKey && feat.actionKey && handleSettingsText(feat.actionKey, opt.v)}
+                                          style={{
+                                            flex: 1, padding: "0.3rem 0.5rem", borderRadius: "0.5rem", border: "none",
+                                            fontWeight: 700, fontSize: "0.7rem", cursor: savingKey ? "not-allowed" : "pointer",
+                                            background: actionVal === opt.v ? (opt.v === "delete_kick" ? "rgba(239,68,68,0.15)" : "rgba(0,212,255,0.12)") : "rgba(255,255,255,0.04)",
+                                            color: actionVal === opt.v ? (opt.v === "delete_kick" ? "#fca5a5" : C.accent) : C.muted,
+                                            border: `1px solid ${actionVal === opt.v ? (opt.v === "delete_kick" ? "rgba(239,68,68,0.3)" : "rgba(0,212,255,0.25)") : "transparent"}`,
+                                            transition: "all 0.15s"
+                                          }}
+                                        >{opt.label}</button>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}

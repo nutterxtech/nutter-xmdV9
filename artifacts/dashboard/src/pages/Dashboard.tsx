@@ -491,26 +491,35 @@ export default function Dashboard() {
                                       }} />
                                     </div>
                                   </div>
-                                  {/* Action selector — only shown for protection features */}
-                                  {feat.actionKey && val && (
-                                    <div style={{ marginTop: "0.65rem", display: "flex", gap: "0.4rem" }}>
-                                      {[
-                                        { v: "delete", label: "🗑 Delete" },
-                                        { v: "delete_kick", label: "🚫 Delete + Kick" },
-                                      ].map(opt => (
-                                        <button
-                                          key={opt.v}
-                                          onClick={() => !savingKey && feat.actionKey && handleSettingsText(feat.actionKey, opt.v)}
-                                          style={{
-                                            flex: 1, padding: "0.3rem 0.5rem", borderRadius: "0.5rem", border: "none",
-                                            fontWeight: 700, fontSize: "0.7rem", cursor: savingKey ? "not-allowed" : "pointer",
-                                            background: actionVal === opt.v ? (opt.v === "delete_kick" ? "rgba(239,68,68,0.15)" : "rgba(0,212,255,0.12)") : "rgba(255,255,255,0.04)",
-                                            color: actionVal === opt.v ? (opt.v === "delete_kick" ? "#fca5a5" : C.accent) : C.muted,
-                                            border: `1px solid ${actionVal === opt.v ? (opt.v === "delete_kick" ? "rgba(239,68,68,0.3)" : "rgba(0,212,255,0.25)") : "transparent"}`,
-                                            transition: "all 0.15s"
-                                          }}
-                                        >{opt.label}</button>
-                                      ))}
+                                  {/* Action selector — always visible for actionable protections */}
+                                  {feat.actionKey && (
+                                    <div style={{ marginTop: "0.65rem" }}>
+                                      <div style={{ color: C.muted, fontSize: "0.67rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.35rem" }}>Action when triggered:</div>
+                                      <div style={{ display: "flex", gap: "0.4rem" }}>
+                                        {[
+                                          { v: "delete", label: "🗑 Delete only" },
+                                          { v: "delete_kick", label: "🚫 Delete + Kick" },
+                                        ].map(opt => (
+                                          <button
+                                            key={opt.v}
+                                            onClick={() => !savingKey && feat.actionKey && handleSettingsText(feat.actionKey, opt.v)}
+                                            style={{
+                                              flex: 1, padding: "0.35rem 0.5rem", borderRadius: "0.5rem",
+                                              fontWeight: 700, fontSize: "0.7rem", cursor: savingKey ? "not-allowed" : "pointer",
+                                              background: actionVal === opt.v
+                                                ? (opt.v === "delete_kick" ? "rgba(239,68,68,0.15)" : "rgba(0,212,255,0.12)")
+                                                : "rgba(255,255,255,0.03)",
+                                              color: actionVal === opt.v
+                                                ? (opt.v === "delete_kick" ? "#fca5a5" : C.accent)
+                                                : C.muted,
+                                              border: `1px solid ${actionVal === opt.v
+                                                ? (opt.v === "delete_kick" ? "rgba(239,68,68,0.35)" : "rgba(0,212,255,0.3)")
+                                                : "rgba(255,255,255,0.06)"}`,
+                                              transition: "all 0.15s"
+                                            }}
+                                          >{opt.label}</button>
+                                        ))}
+                                      </div>
                                     </div>
                                   )}
                                 </div>

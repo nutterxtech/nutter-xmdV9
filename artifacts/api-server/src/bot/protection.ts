@@ -1,6 +1,10 @@
 import { WASocket, proto } from "@whiskeysockets/baileys";
 import { UserSettings } from "@workspace/db";
 
+function normalizeJid(jid: string): string {
+  return jid.replace(/:[\d]+@/, "@");
+}
+
 const spamTracker = new Map<string, { count: number; lastTime: number }>();
 
 export async function handleProtection(
@@ -23,8 +27,8 @@ export async function handleProtection(
     const groupMeta = await sock.groupMetadata(chatId).catch(() => null);
     if (!groupMeta) return;
 
-    const botJid = sock.user?.id || "";
-    const botPart = groupMeta.participants.find(p => p.id === botJid);
+    const botJid = normalizeJid(sock.user?.id || "");
+    const botPart = groupMeta.participants.find(p => normalizeJid(p.id) === botJid);
     const isBotAdmin = botPart?.admin === "admin" || botPart?.admin === "superadmin";
     if (!isBotAdmin) return;
 

@@ -71,8 +71,12 @@ router.get("/bot/status/:userId", async (req: Request<{ userId: string }>, res) 
     return;
   }
   let tokenUserId: string;
+  let tokenSessionId: string;
   try {
-    tokenUserId = Buffer.from(rawToken, "base64").toString("utf8").split(":")[0];
+    const decoded = Buffer.from(rawToken, "base64").toString("utf8");
+    const parts = decoded.split(":");
+    tokenUserId = parts[0] ?? "";
+    tokenSessionId = parts[1] ?? "";
   } catch {
     res.status(401).json({ error: "Invalid token" });
     return;
@@ -86,10 +90,15 @@ router.get("/bot/status/:userId", async (req: Request<{ userId: string }>, res) 
     res.status(404).json({ error: "User not found" });
     return;
   }
+  if (user.sessionId !== tokenSessionId) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
   const instance = botInstances.get(userId);
   res.json({
     connected: !!instance,
     status: user.status,
+    phone: user.phone,
     lastSeen: user.lastSeen,
   });
 });

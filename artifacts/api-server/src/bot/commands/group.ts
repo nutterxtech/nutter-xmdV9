@@ -1,6 +1,10 @@
 import { WASocket, proto } from "@whiskeysockets/baileys";
 import { UserSettings } from "@workspace/db";
 
+function normalizeJid(jid: string): string {
+  return jid.replace(/:[\d]+@/, "@");
+}
+
 async function checkAdminPerms(sock: WASocket, chatId: string, sender: string): Promise<{ ok: boolean; reason?: string }> {
   if (!chatId.endsWith("@g.us")) {
     return { ok: false, reason: "❌ This command can only be used in groups!" };
@@ -8,9 +12,10 @@ async function checkAdminPerms(sock: WASocket, chatId: string, sender: string): 
   const meta = await sock.groupMetadata(chatId).catch(() => null);
   if (!meta) return { ok: false, reason: "❌ Could not fetch group info." };
 
-  const botJid = sock.user?.id || "";
-  const bot = meta.participants.find(p => p.id === botJid);
-  const user = meta.participants.find(p => p.id === sender);
+  const botJid = normalizeJid(sock.user?.id || "");
+  const normalizedSender = normalizeJid(sender);
+  const bot = meta.participants.find(p => normalizeJid(p.id) === botJid);
+  const user = meta.participants.find(p => normalizeJid(p.id) === normalizedSender);
 
   if (!bot || (bot.admin !== "admin" && bot.admin !== "superadmin")) {
     return { ok: false, reason: "❌ I need to be a group admin to do that!" };
@@ -128,8 +133,8 @@ export async function handleGroupCommand(
     case "kickall": {
       const meta = await sock.groupMetadata(chatId).catch(() => null);
       if (!meta) return;
-      const botJid = sock.user?.id || "";
-      const others = meta.participants.filter(p => p.id !== botJid && p.admin !== "admin" && p.admin !== "superadmin").map(p => p.id);
+      const botJid = normalizeJid(sock.user?.id || "");
+      const others = meta.participants.filter(p => normalizeJid(p.id) !== botJid && p.admin !== "admin" && p.admin !== "superadmin").map(p => p.id);
       if (others.length > 0) {
         await sock.groupParticipantsUpdate(chatId, others, "remove").catch(() => {});
         await sock.sendMessage(chatId, { text: `✅ Kicked ${others.length} members!` }, { quoted: msg }).catch(() => {});

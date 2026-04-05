@@ -33,6 +33,7 @@ export async function pairBot(phone: string): Promise<{
 export async function getBotStatus(userId: string, token?: string | null): Promise<{
   connected: boolean;
   status: string;
+  phone?: string;
   lastSeen: string | null;
 }> {
   const headers: Record<string, string> = {};

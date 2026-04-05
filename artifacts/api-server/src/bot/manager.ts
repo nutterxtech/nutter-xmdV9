@@ -241,8 +241,8 @@ export async function createBotInstance(
     const groupMeta = await sock.groupMetadata(groupJid).catch(() => null);
     if (!groupMeta) return;
 
-    const botJid = sock.user?.id || "";
-    const botParticipant = groupMeta.participants.find(p => p.id === botJid);
+    const botJid = (sock.user?.id || "").replace(/:[\d]+@/, "@");
+    const botParticipant = groupMeta.participants.find(p => p.id.replace(/:[\d]+@/, "@") === botJid);
     const isBotAdmin = botParticipant?.admin === "admin" || botParticipant?.admin === "superadmin";
     if (!isBotAdmin) return;
 

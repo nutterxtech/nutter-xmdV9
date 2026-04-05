@@ -88,6 +88,18 @@ export default function Dashboard() {
     if (!getToken()) return;
     try {
       const fresh = await getBots();
+      // Auto-dismiss linking UI as soon as a bot becomes connected
+      fresh.forEach(bot => {
+        if (bot.connected) {
+          setLinkMode(prev => {
+            if (!prev[bot.id]) return prev;
+            stopQRPoll(bot.id);
+            return { ...prev, [bot.id]: null };
+          });
+          setQrImage(prev => ({ ...prev, [bot.id]: null }));
+          setPairingCode(prev => ({ ...prev, [bot.id]: null }));
+        }
+      });
       setBots(fresh);
     } catch (_) {}
   }
@@ -170,13 +182,15 @@ export default function Dashboard() {
 
   async function handleStartQR(botId: string) {
     setLinkError(prev => ({ ...prev, [botId]: "" }));
+    // Show connecting state immediately — don't wait for the HTTP response
+    setLinkMode(prev => ({ ...prev, [botId]: "qr" }));
+    setQrImage(prev => ({ ...prev, [botId]: null }));
     setLinkLoading(prev => ({ ...prev, [botId]: true }));
     try {
       await startQR(botId);
-      setLinkMode(prev => ({ ...prev, [botId]: "qr" }));
-      setQrImage(prev => ({ ...prev, [botId]: null }));
       startQRPoll(botId);
     } catch (err) {
+      setLinkMode(prev => ({ ...prev, [botId]: null }));
       setLinkError(prev => ({ ...prev, [botId]: err instanceof Error ? err.message : "Failed to start QR" }));
     } finally {
       setLinkLoading(prev => ({ ...prev, [botId]: false }));
@@ -255,58 +269,55 @@ export default function Dashboard() {
         background: "rgba(8,13,26,0.96)", backdropFilter: "blur(16px)",
         borderBottom: `1px solid ${C.border}`,
         padding: "0 1.5rem", display: "flex", alignItems: "center",
-        justifyContent: "space-between", height: 60, gap: "1rem"
+        justifyContent: "space-between", height: 56, gap: "1rem"
       }}>
         <button onClick={() => navigate("/")} style={{
           background: "none", border: "none", cursor: "pointer",
           display: "flex", alignItems: "center", gap: "0.4rem", padding: 0, flexShrink: 0
         }}>
-          <span style={{ fontSize: "1.25rem" }}>⚡</span>
+          <span style={{ fontSize: "1.2rem" }}>⚡</span>
           <span style={{
-            fontWeight: 900, fontSize: "1.05rem",
+            fontWeight: 900, fontSize: "1rem",
             background: "linear-gradient(135deg, #00d4ff, #a855f7)",
             WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent"
           }}>NUTTER-XMD</span>
         </button>
 
-        <div style={{ display: "flex", gap: "0.2rem", background: "rgba(30,58,95,0.3)", borderRadius: "0.75rem", padding: "0.25rem" }}>
-          {(["bots", "settings"] as ActiveTab[]).map(tab => (
-            <button key={tab} onClick={() => {
-              setActiveTab(tab);
-              if (tab === "settings" && (settingsBot || bots[0])) {
-                const bid = settingsBot?.id || bots[0]?.id;
-                if (bid) { setSelectedBotId(bid); loadSettings(bid); }
-              }
-            }} style={{
-              padding: "0.4rem 1.1rem", borderRadius: "0.55rem", border: "none",
-              fontWeight: 700, fontSize: "0.85rem", cursor: "pointer",
-              background: activeTab === tab ? "linear-gradient(135deg, rgba(0,212,255,0.18), rgba(168,85,247,0.18))" : "transparent",
-              color: activeTab === tab ? C.text : C.muted,
-              transition: "all 0.2s"
-            }}>
-              {tab === "bots" ? "🤖 My Bots" : "⚙️ Settings"}
-            </button>
-          ))}
-        </div>
-
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexShrink: 0 }}>
-          {account && (
-            <div style={{ display: "none" }}>
-              <span style={{ color: C.muted, fontSize: "0.8rem" }}>@{account.username}</span>
-            </div>
-          )}
-          <div style={{ color: C.muted, fontSize: "0.8rem", display: "flex", alignItems: "center", gap: "0.35rem" }}>
-            <span style={{ color: "#a855f7", fontWeight: 600 }}>@{account?.username}</span>
-          </div>
+          <span style={{ color: "#a855f7", fontWeight: 600, fontSize: "0.8rem" }}>@{account?.username}</span>
           <button onClick={logout} style={{
             background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.18)",
-            color: "#fca5a5", borderRadius: "0.5rem", padding: "0.35rem 0.875rem",
+            color: "#fca5a5", borderRadius: "0.5rem", padding: "0.3rem 0.8rem",
             cursor: "pointer", fontSize: "0.8rem", fontWeight: 600
           }}>Logout</button>
         </div>
       </nav>
 
-      <div style={{ maxWidth: 960, margin: "0 auto", padding: "2rem 1rem" }}>
+      <div style={{ maxWidth: 960, margin: "0 auto", padding: "1.5rem 1rem" }}>
+
+        {/* Tab selector — lives below the nav */}
+        <div style={{ display: "flex", gap: "0.25rem", background: "rgba(30,58,95,0.25)", borderRadius: "0.875rem", padding: "0.3rem", marginBottom: "1.75rem", width: "fit-content" }}>
+          {(["bots", "settings"] as ActiveTab[]).map(tab => (
+            <button key={tab} onClick={() => {
+              setActiveTab(tab);
+              if (tab === "settings") {
+                const bid = settingsBot?.id || bots[0]?.id;
+                if (bid) { setSelectedBotId(bid); loadSettings(bid); }
+              }
+            }} style={{
+              padding: "0.5rem 1.4rem", borderRadius: "0.6rem", border: "none",
+              fontWeight: 700, fontSize: "0.875rem", cursor: "pointer",
+              background: activeTab === tab
+                ? "linear-gradient(135deg, rgba(0,212,255,0.2), rgba(168,85,247,0.2))"
+                : "transparent",
+              color: activeTab === tab ? C.text : C.muted,
+              boxShadow: activeTab === tab ? `inset 0 0 0 1px rgba(0,212,255,0.25)` : "none",
+              transition: "all 0.18s"
+            }}>
+              {tab === "bots" ? "🤖 My Bots" : "⚙️ Settings"}
+            </button>
+          ))}
+        </div>
 
         {activeTab === "bots" && (
           <div>
@@ -636,9 +647,11 @@ function BotCard({
             <div>
               <p style={{ color: C.muted, fontSize: "0.82rem", marginBottom: "0.75rem" }}>Choose how to link this bot:</p>
               <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-                <button onClick={() => onSetLinkMode("qr")} style={{
+                {/* QR Code — starts immediately on click */}
+                <button onClick={onStartQR} disabled={isLoading} style={{
                   flex: "1 1 140px", background: "rgba(0,212,255,0.06)", border: "1px solid rgba(0,212,255,0.2)",
-                  borderRadius: "0.875rem", padding: "1rem", cursor: "pointer", textAlign: "center"
+                  borderRadius: "0.875rem", padding: "1rem", cursor: isLoading ? "not-allowed" : "pointer", textAlign: "center",
+                  opacity: isLoading ? 0.6 : 1
                 }}>
                   <div style={{ fontSize: "1.5rem", marginBottom: "0.3rem" }}>📱</div>
                   <div style={{ color: C.text, fontWeight: 700, fontSize: "0.875rem" }}>QR Code</div>
@@ -659,31 +672,37 @@ function BotCard({
           {linkMode === "qr" && !pairingCode && (
             <div>
               {!qrImage ? (
-                <div style={{ textAlign: "center" }}>
-                  <button onClick={onStartQR} disabled={isLoading} style={{
-                    background: isLoading ? C.border : "linear-gradient(135deg, #00d4ff, #a855f7)",
-                    color: "white", border: "none", borderRadius: "0.75rem",
-                    padding: "0.75rem 2rem", cursor: isLoading ? "not-allowed" : "pointer",
-                    fontWeight: 700, fontSize: "0.9rem", marginBottom: "0.75rem"
-                  }}>{isLoading ? "Starting..." : "📱 Generate QR Code"}</button>
-                  <p style={{ color: C.muted, fontSize: "0.8rem" }}>
-                    Open WhatsApp → Settings → Linked Devices → Link a Device
-                  </p>
+                /* Connecting / loading state — shown while Baileys generates the QR */
+                <div style={{ textAlign: "center", padding: "1.25rem 0" }}>
+                  <div style={{
+                    display: "inline-block", width: 52, height: 52, borderRadius: "50%",
+                    border: "3px solid rgba(0,212,255,0.15)",
+                    borderTop: "3px solid #00d4ff",
+                    animation: "spin 0.9s linear infinite",
+                    marginBottom: "1rem"
+                  }} />
+                  <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+                  <div style={{ color: C.text, fontWeight: 700, fontSize: "0.95rem", marginBottom: "0.3rem" }}>
+                    Connecting to WhatsApp…
+                  </div>
+                  <div style={{ color: C.muted, fontSize: "0.78rem" }}>
+                    Generating QR code, usually takes 2–5 seconds
+                  </div>
                 </div>
               ) : (
                 <div style={{ textAlign: "center" }}>
                   <p style={{ color: C.muted, fontSize: "0.8rem", marginBottom: "0.75rem" }}>
                     Scan with WhatsApp → Linked Devices → Link a Device
                   </p>
-                  <div style={{ display: "inline-block", background: "white", borderRadius: "0.75rem", padding: "0.75rem" }}>
-                    <img src={qrImage} alt="QR Code" style={{ width: 200, height: 200, display: "block" }} />
+                  <div style={{ display: "inline-block", background: "white", borderRadius: "0.875rem", padding: "0.75rem", boxShadow: "0 0 30px rgba(0,212,255,0.15)" }}>
+                    <img src={qrImage} alt="QR Code" style={{ width: 220, height: 220, display: "block" }} />
                   </div>
-                  <p style={{ color: C.muted, fontSize: "0.75rem", marginTop: "0.5rem" }}>
-                    QR refreshes automatically. Do not close this page.
+                  <p style={{ color: C.muted, fontSize: "0.75rem", marginTop: "0.6rem" }}>
+                    QR refreshes automatically · Do not close this page
                   </p>
                 </div>
               )}
-              <div style={{ textAlign: "center", marginTop: "0.75rem" }}>
+              <div style={{ textAlign: "center", marginTop: "1rem" }}>
                 <button onClick={onCancelLink} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "0.8rem" }}>← Back</button>
               </div>
             </div>

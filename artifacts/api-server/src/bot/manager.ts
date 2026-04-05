@@ -3,6 +3,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
+  Browsers,
   proto,
   WASocket,
 } from "@whiskeysockets/baileys";
@@ -87,9 +88,11 @@ export async function createBotInstance(
     },
     printQRInTerminal: false,
     logger: makeBaileysLogger(),
-    browser: ["NUTTER-XMD", "Chrome", "4.0.0"],
+    browser: Browsers.ubuntu("Chrome"),
     generateHighQualityLinkPreview: true,
     syncFullHistory: false,
+    connectTimeoutMs: 60_000,
+    keepAliveIntervalMs: 25_000,
   });
 
   const instance: BotInstance = { socket: sock, userId, phone, paused: false, connected: false };
@@ -325,8 +328,10 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
       },
       printQRInTerminal: false,
       logger: makeBaileysLogger(),
-      browser: ["NUTTER-XMD", "Chrome", "4.0.0"],
+      browser: Browsers.ubuntu("Chrome"),
       syncFullHistory: false,
+      connectTimeoutMs: 60_000,
+      keepAliveIntervalMs: 25_000,
     });
 
     const instance: BotInstance = { socket: sock, userId, phone, paused: false, connected: false };
@@ -335,9 +340,11 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
 
     pendingPairings.set(userId, { resolve, reject });
 
+    // Give the socket 3 seconds to fully register with WhatsApp before requesting code
     setTimeout(async () => {
       try {
         const cleanPhone = phone.replace(/[^0-9]/g, "");
+        logger.info({ userId, cleanPhone }, "Requesting pairing code...");
         const code = await sock.requestPairingCode(cleanPhone);
         if (code) {
           const pending = pendingPairings.get(userId);
@@ -353,7 +360,7 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
           pendingPairings.delete(userId);
         }
       }
-    }, 2000);
+    }, 3000);
 
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect } = update;
@@ -466,8 +473,10 @@ export async function initiateQR(userId: string): Promise<void> {
     },
     printQRInTerminal: false,
     logger: makeBaileysLogger(),
-    browser: ["NUTTER-XMD", "Chrome", "4.0.0"],
+    browser: Browsers.ubuntu("Chrome"),
     syncFullHistory: false,
+    connectTimeoutMs: 60_000,
+    keepAliveIntervalMs: 25_000,
   });
 
   const instance: BotInstance = { socket: sock, userId, phone: null, paused: false, connected: false };
@@ -496,6 +505,11 @@ export async function initiateQR(userId: string): Promise<void> {
         botInstances.delete(userId);
         return;
       }
+      // Socket dropped before QR was scanned/confirmed — re-generate a fresh QR
+      logger.info({ userId }, "QR socket closed unexpectedly, re-initiating...");
+      botInstances.delete(userId);
+      setTimeout(() => initiateQR(userId).catch(() => {}), 3000);
+      return;
     }
 
     if (connection === "open") {

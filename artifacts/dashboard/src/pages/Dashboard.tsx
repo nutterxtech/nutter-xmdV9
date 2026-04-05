@@ -734,23 +734,41 @@ function BotCard({
           {pairingCode && (
             <div>
               <div style={{
-                background: "rgba(0,212,255,0.04)", border: "1px solid rgba(0,212,255,0.2)",
+                background: "rgba(168,85,247,0.06)", border: "1px solid rgba(168,85,247,0.2)",
                 borderRadius: "1rem", padding: "1.5rem", textAlign: "center", marginBottom: "1rem"
               }}>
-                <p style={{ color: C.muted, fontSize: "0.8rem", marginBottom: "0.5rem" }}>Enter this code in WhatsApp:</p>
-                <div style={{ fontFamily: "monospace", fontSize: "2.5rem", fontWeight: 900, letterSpacing: "0.4rem", color: C.accent, textShadow: "0 0 20px rgba(0,212,255,0.4)", marginBottom: "0.5rem" }}>{fmt}</div>
+                <p style={{ color: C.muted, fontSize: "0.78rem", marginBottom: "0.5rem" }}>Your pairing code:</p>
+                <div style={{ fontFamily: "monospace", fontSize: "2.4rem", fontWeight: 900, letterSpacing: "0.45rem", color: "#a855f7", textShadow: "0 0 24px rgba(168,85,247,0.45)", marginBottom: "0.75rem" }}>{fmt}</div>
+                <button
+                  onClick={() => navigator.clipboard?.writeText(pairingCode)}
+                  style={{ background: "rgba(168,85,247,0.1)", border: "1px solid rgba(168,85,247,0.25)", color: "#c4b5fd", borderRadius: "0.5rem", padding: "0.3rem 0.9rem", cursor: "pointer", fontSize: "0.78rem", fontWeight: 600, marginBottom: "0.75rem" }}
+                >📋 Copy code</button>
+                <br />
                 {pairingCountdown > 0 ? (
-                  <span style={{ background: pairingCountdown < 30 ? "rgba(239,68,68,0.1)" : "rgba(0,212,255,0.08)", border: `1px solid ${pairingCountdown < 30 ? "rgba(239,68,68,0.2)" : "rgba(0,212,255,0.15)"}`, borderRadius: "100px", padding: "0.2rem 0.7rem", color: pairingCountdown < 30 ? "#fca5a5" : C.accent, fontSize: "0.78rem", fontWeight: 600 }}>
+                  <span style={{ background: pairingCountdown < 30 ? "rgba(239,68,68,0.1)" : "rgba(168,85,247,0.08)", border: `1px solid ${pairingCountdown < 30 ? "rgba(239,68,68,0.2)" : "rgba(168,85,247,0.15)"}`, borderRadius: "100px", padding: "0.2rem 0.7rem", color: pairingCountdown < 30 ? "#fca5a5" : "#c4b5fd", fontSize: "0.78rem", fontWeight: 600 }}>
                     ⏱ {mins}:{secs.toString().padStart(2, "0")} remaining
                   </span>
                 ) : (
-                  <span style={{ color: "#ef4444", fontSize: "0.78rem" }}>Expired</span>
+                  <span style={{ color: "#ef4444", fontSize: "0.78rem" }}>Code expired — click Try again</span>
                 )}
               </div>
-              <p style={{ color: C.muted, fontSize: "0.78rem", lineHeight: 1.7 }}>
-                Go to WhatsApp → Settings → Linked Devices → Link a Device → Link with Phone Number
-              </p>
-              <button onClick={onCancelLink} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "0.8rem", marginTop: "0.5rem" }}>← Try again</button>
+              {/* Step-by-step guide */}
+              <div style={{ background: "rgba(15,23,42,0.6)", border: `1px solid ${C.border}`, borderRadius: "0.75rem", padding: "1rem", marginBottom: "0.75rem" }}>
+                <p style={{ color: C.text, fontWeight: 700, fontSize: "0.82rem", marginBottom: "0.5rem" }}>How to enter the code on your phone:</p>
+                {[
+                  "Open WhatsApp on your phone",
+                  "Tap the ⋮ menu (top right) → Linked Devices",
+                  'Tap "Link a Device"',
+                  'Tap "Link with phone number instead" (bottom of camera screen)',
+                  "Enter the 8-digit code shown above",
+                ].map((step, i) => (
+                  <div key={i} style={{ display: "flex", gap: "0.6rem", alignItems: "flex-start", marginBottom: "0.3rem" }}>
+                    <span style={{ background: "rgba(168,85,247,0.15)", color: "#a855f7", borderRadius: "50%", width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.7rem", fontWeight: 800, flexShrink: 0, marginTop: 1 }}>{i + 1}</span>
+                    <span style={{ color: C.muted, fontSize: "0.78rem", lineHeight: 1.5 }}>{step}</span>
+                  </div>
+                ))}
+              </div>
+              <button onClick={onCancelLink} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: "0.8rem" }}>← Try again</button>
             </div>
           )}
         </div>

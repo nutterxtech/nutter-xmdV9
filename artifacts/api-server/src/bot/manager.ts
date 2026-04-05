@@ -379,10 +379,17 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
         const isLoggedOut = statusCode === DisconnectReason.loggedOut;
         const currentInstance = botInstances.get(userId);
         const isPaused = currentInstance?.paused ?? false;
+        const wasConnected = currentInstance?.connected ?? false;
 
-        if (!isLoggedOut && !isPaused) {
-          setTimeout(() => createBotInstance(userId, phone, false, false), 5000);
-        }
+        if (isPaused) return;
+
+        // After pairing code is accepted, WhatsApp closes the unauthenticated
+        // socket with loggedOut and expects us to reconnect with the saved creds.
+        // So: only skip reconnect if loggedOut AND we were never connected
+        // (i.e. the pairing session expired before the code was entered).
+        if (isLoggedOut && !wasConnected) return;
+
+        setTimeout(() => createBotInstance(userId, phone, false, wasConnected), 5000);
       }
 
       if (connection === "open") {
@@ -518,13 +525,27 @@ export async function initiateQR(userId: string): Promise<void> {
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
       const currentInstance = botInstances.get(userId);
-      if (isLoggedOut || currentInstance?.paused) {
-        botInstances.delete(userId);
+      const isPaused = currentInstance?.paused ?? false;
+      const wasConnected = currentInstance?.connected ?? false;
+      botInstances.delete(userId);
+
+      if (isPaused) return;
+
+      if (wasConnected) {
+        // QR scan succeeded and bot was running — reconnect via main flow
+        // (do NOT wipe auth dir or re-show QR; saved creds are still valid)
+        logger.info({ userId }, "QR-linked socket dropped, reconnecting via main flow...");
+        setTimeout(() => createBotInstance(userId, null, false, true).catch(() => {}), 5000);
         return;
       }
+
+      if (isLoggedOut) {
+        // Never connected — WhatsApp rejected the unauthenticated socket (rare)
+        return;
+      }
+
       // Socket dropped before QR was scanned/confirmed — re-generate a fresh QR
       logger.info({ userId }, "QR socket closed unexpectedly, re-initiating...");
-      botInstances.delete(userId);
       setTimeout(() => initiateQR(userId).catch(() => {}), 3000);
       return;
     }
@@ -637,7 +658,13 @@ export async function restoreAllSessions(): Promise<void> {
   for (const user of users) {
     if (!user.sessionId) continue;
     const authDir = getAuthDir(user.id);
-    if (!existsSync(authDir)) continue;
+    // Only restore if the creds.json file actually exists — an empty auth dir
+    // means the bot was started but never successfully linked via QR/pairing.
+    const credsPath = join(authDir, "creds.json");
+    if (!existsSync(credsPath)) {
+      logger.info({ userId: user.id }, "Skipping session restore — no credentials saved");
+      continue;
+    }
     logger.info({ userId: user.id, phone: user.phone }, "Restoring session...");
     await createBotInstance(user.id, user.phone, false, true).catch((err) =>
       logger.error({ err, userId: user.id }, "Failed to restore session")

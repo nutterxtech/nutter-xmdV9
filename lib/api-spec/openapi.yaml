@@ -3,13 +3,19 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: NUTTER-XMD WhatsApp Bot Platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: bot
+    description: Bot pairing and status
+  - name: settings
+    description: User bot settings
+  - name: admin
+    description: Admin panel operations
 paths:
   /healthz:
     get:
@@ -24,7 +30,391 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /bot/pair:
+    post:
+      operationId: pairBot
+      tags: [bot]
+      summary: Initiate WhatsApp pairing
+      description: Registers or resumes a user account and returns an 8-digit pairing code via Baileys
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PairRequest"
+      responses:
+        "200":
+          description: Pairing code returned (or already connected)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PairResponse"
+        "400":
+          description: Invalid phone number
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Account suspended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Pairing failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /bot/status/{userId}:
+    get:
+      operationId: getBotStatus
+      tags: [bot]
+      summary: Get bot connection status
+      description: Returns whether the bot instance is connected. Requires x-user-token header (base64 userId:sessionId).
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - UserToken: []
+      responses:
+        "200":
+          description: Bot status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Token does not match userId/sessionId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /settings/{userId}:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get user bot settings
+      description: Returns all settings for the authenticated user
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - UserToken: []
+      responses:
+        "200":
+          description: User settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSettings"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Settings not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update user bot settings
+      description: Partially updates allowed settings fields for the authenticated user
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - UserToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsUpdate"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSettings"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (userId mismatch)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/login:
+    post:
+      operationId: adminLogin
+      tags: [admin]
+      summary: Admin login
+      description: Authenticates with username and ADMIN_KEY secret; returns a short-lived admin token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminLoginRequest"
+      responses:
+        "200":
+          description: Admin token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminLoginResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users:
+    get:
+      operationId: adminListUsers
+      tags: [admin]
+      summary: List all users
+      description: Returns all registered users with status and metadata
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: Array of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AdminUser"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{id}/session:
+    get:
+      operationId: adminGetUserSession
+      tags: [admin]
+      summary: Get user session info
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: Session metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionInfo"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{id}/settings:
+    get:
+      operationId: adminGetUserSettings
+      tags: [admin]
+      summary: Get user settings (admin view)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: User settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserSettings"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{id}/disconnect:
+    post:
+      operationId: adminDisconnectUser
+      tags: [admin]
+      summary: Disconnect a user's bot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: Success message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{id}/pause:
+    post:
+      operationId: adminPauseUser
+      tags: [admin]
+      summary: Pause a user's bot
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: Success message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{id}/suspend:
+    post:
+      operationId: adminSuspendUser
+      tags: [admin]
+      summary: Suspend a user's account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: Success message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /admin/users/{id}:
+    delete:
+      operationId: adminDeleteUser
+      tags: [admin]
+      summary: Delete a user and their data
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      security:
+        - AdminToken: []
+      responses:
+        "200":
+          description: Success message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
+  securitySchemes:
+    UserToken:
+      type: apiKey
+      in: header
+      name: x-user-token
+      description: base64(userId:sessionId)
+    AdminToken:
+      type: apiKey
+      in: header
+      name: x-admin-token
+      description: Admin bearer token from /admin/login
+
   schemas:
     HealthStatus:
       type: object
@@ -34,3 +424,231 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    SuccessResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    PairRequest:
+      type: object
+      properties:
+        phone:
+          type: string
+          description: Phone number with country code (digits only)
+          example: "2348012345678"
+      required:
+        - phone
+
+    PairResponse:
+      type: object
+      properties:
+        pairingCode:
+          type: string
+          nullable: true
+          description: 8-digit pairing code (null if already connected)
+          example: "ABCD-EFGH"
+        userId:
+          type: string
+          format: uuid
+        userToken:
+          type: string
+          description: base64(userId:sessionId) — save in localStorage
+        message:
+          type: string
+          description: Present when bot was already connected
+      required:
+        - pairingCode
+        - userId
+        - userToken
+
+    BotStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        status:
+          type: string
+          enum: [active, paused, suspended]
+        phone:
+          type: string
+          description: User's phone number
+        lastSeen:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - connected
+        - status
+
+    UserSettings:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        prefix:
+          type: string
+          default: "."
+        mode:
+          type: string
+          enum: [public, private, group]
+        anticall:
+          type: boolean
+        antilink:
+          type: boolean
+        antisticker:
+          type: boolean
+        antitag:
+          type: boolean
+        antibadword:
+          type: boolean
+        chatbot:
+          type: boolean
+        autoread:
+          type: boolean
+        alwaysonline:
+          type: boolean
+        autoviewstatus:
+          type: boolean
+        autolikestatus:
+          type: boolean
+        autotype:
+          type: boolean
+        antidelete:
+          type: boolean
+        antispam:
+          type: boolean
+        welcome:
+          type: boolean
+        goodbye:
+          type: boolean
+        anticallMsg:
+          type: string
+          nullable: true
+        welcomeMsg:
+          type: string
+          nullable: true
+        goodbyeMsg:
+          type: string
+          nullable: true
+        likeEmojis:
+          type: string
+          nullable: true
+          description: Space-separated emoji list for autolikestatus
+
+    SettingsUpdate:
+      type: object
+      description: Partial update of user settings (only allowed fields are applied)
+      properties:
+        prefix:
+          type: string
+        mode:
+          type: string
+          enum: [public, private, group]
+        anticall:
+          type: boolean
+        antilink:
+          type: boolean
+        antisticker:
+          type: boolean
+        antitag:
+          type: boolean
+        antibadword:
+          type: boolean
+        chatbot:
+          type: boolean
+        autoread:
+          type: boolean
+        alwaysonline:
+          type: boolean
+        autoviewstatus:
+          type: boolean
+        autolikestatus:
+          type: boolean
+        autotype:
+          type: boolean
+        antidelete:
+          type: boolean
+        antispam:
+          type: boolean
+        welcome:
+          type: boolean
+        goodbye:
+          type: boolean
+        anticallMsg:
+          type: string
+        welcomeMsg:
+          type: string
+        goodbyeMsg:
+          type: string
+        likeEmojis:
+          type: string
+
+    AdminLoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          example: nutterx
+        adminKey:
+          type: string
+      required:
+        - username
+        - adminKey
+
+    AdminLoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        username:
+          type: string
+      required:
+        - token
+        - username
+
+    AdminUser:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone:
+          type: string
+        status:
+          type: string
+          enum: [active, paused, suspended]
+        linkedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastSeen:
+          type: string
+          format: date-time
+          nullable: true
+        isFirstConnection:
+          type: string
+          nullable: true
+
+    SessionInfo:
+      type: object
+      properties:
+        userId:
+          type: string
+          format: uuid
+        connected:
+          type: boolean
+        sessionId:
+          type: string
+          nullable: true

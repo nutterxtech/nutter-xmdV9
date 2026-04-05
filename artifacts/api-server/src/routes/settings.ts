@@ -17,12 +17,8 @@ async function requireUser(req: Request, res: Response, next: NextFunction): Pro
 
   const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "nutterx";
   const ADMIN_KEY = process.env.ADMIN_KEY;
-  if (!ADMIN_KEY) {
-    res.status(500).json({ error: "Server misconfigured: ADMIN_KEY not set" });
-    return;
-  }
 
-  if (adminToken) {
+  if (adminToken && ADMIN_KEY) {
     const decoded = Buffer.from(adminToken, "base64").toString();
     const [user, key] = decoded.split(":");
     if (user === ADMIN_USERNAME && key === ADMIN_KEY) {

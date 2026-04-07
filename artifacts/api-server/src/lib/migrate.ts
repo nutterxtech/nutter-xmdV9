@@ -72,15 +72,6 @@ export async function runMigrations(): Promise<void> {
       );
     `);
 
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS bot_sessions (
-        bot_id      text      PRIMARY KEY,
-        creds       jsonb,
-        keys        jsonb     NOT NULL DEFAULT '{}'::jsonb,
-        updated_at  timestamp NOT NULL DEFAULT NOW()
-      );
-    `);
-
     logger.info("DB migrations complete");
   } catch (err) {
     logger.error({ err }, "DB migration failed");

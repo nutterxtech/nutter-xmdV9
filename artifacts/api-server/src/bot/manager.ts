@@ -10,17 +10,17 @@ import makeWASocket, {
 import { Boom } from "@hapi/boom";
 import { v4 as uuidv4 } from "uuid";
 import { join } from "path";
-import { existsSync, mkdirSync, rmSync } from "fs";
+import { rmSync } from "fs";
 import QRCode from "qrcode";
 import { db } from "@workspace/db";
-import { usersTable, userSettingsTable, messagesTable, botSessionsTable } from "@workspace/db";
+import { usersTable, userSettingsTable, messagesTable } from "@workspace/db";
 import { eq, lt, and } from "drizzle-orm";
 import { logger } from "../lib/logger.js";
 import { handleCommand } from "./commands/index.js";
 import { handleProtection } from "./protection.js";
 import { handlePresence } from "./presence.js";
 import { getCachedSettings, invalidateSettingsCache } from "./settings-cache.js";
-import { useDatabaseAuthState, hasStoredSession } from "./db-auth-state.js";
+import { useFilesystemAuthState, hasStoredSession } from "./db-auth-state.js";
 import pino from "pino";
 
 const AUTH_DIR = join(process.cwd(), "sessions");
@@ -59,12 +59,6 @@ async function getBaileysVersion(): Promise<[number, number, number]> {
   const { version } = await fetchLatestBaileysVersion();
   baileysVersionCache = { version, fetchedAt: Date.now() };
   return version;
-}
-
-function getAuthDir(userId: string): string {
-  const dir = join(AUTH_DIR, userId);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return dir;
 }
 
 function extractInviteCode(urlOrCode: string): string {
@@ -382,7 +376,7 @@ export async function createBotInstance(
   creatingInstances.add(userId);
   try {
     const version = await getBaileysVersion();
-    const { state, saveCreds } = await useDatabaseAuthState(userId);
+    const { state, saveCreds } = await useFilesystemAuthState(userId);
     const sock = makeSocket(version, state);
 
     const instance: BotInstance = { socket: sock, userId, phone, paused: false, connected: false };
@@ -503,10 +497,8 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
     creatingInstances.delete(userId);
     pendingQRCodes.delete(userId);
 
-    // Clear any stored session so the new pairing starts fresh
-    await db.delete(botSessionsTable).where(eq(botSessionsTable.botId, userId)).catch(() => {});
-    // Also clear local filesystem session if present (local dev / migration)
-    try { rmSync(getAuthDir(userId), { recursive: true, force: true }); } catch (_) {}
+    // Clear any stored filesystem session so the new pairing starts fresh
+    try { rmSync(join(AUTH_DIR, userId), { recursive: true, force: true }); } catch (_) {}
 
     let version: [number, number, number];
     try {
@@ -516,7 +508,7 @@ export async function initiatePairing(userId: string, phone: string): Promise<st
       return;
     }
 
-    const { state, saveCreds } = await useDatabaseAuthState(userId);
+    const { state, saveCreds } = await useFilesystemAuthState(userId);
     const sock = makeSocket(version, state);
     const instance: BotInstance = { socket: sock, userId, phone, paused: false, connected: false };
     botInstances.set(userId, instance);
@@ -584,12 +576,11 @@ export async function initiateQR(userId: string): Promise<void> {
   creatingInstances.delete(userId);
   pendingQRCodes.delete(userId);
 
-  // Clear any stored session so the new QR scan starts fresh
-  await db.delete(botSessionsTable).where(eq(botSessionsTable.botId, userId)).catch(() => {});
-  try { rmSync(getAuthDir(userId), { recursive: true, force: true }); } catch (_) {}
+  // Clear any stored filesystem session so the new QR scan starts fresh
+  try { rmSync(join(AUTH_DIR, userId), { recursive: true, force: true }); } catch (_) {}
 
   const version = await getBaileysVersion();
-  const { state, saveCreds } = await useDatabaseAuthState(userId);
+  const { state, saveCreds } = await useFilesystemAuthState(userId);
   const sock = makeSocket(version, state);
 
   const instance: BotInstance = { socket: sock, userId, phone: null, paused: false, connected: false };
@@ -673,9 +664,8 @@ export async function deleteBotSession(userId: string): Promise<void> {
   }
 
   pendingQRCodes.delete(userId);
-  // Remove from DB (primary) and filesystem (local dev / migration)
-  await db.delete(botSessionsTable).where(eq(botSessionsTable.botId, userId)).catch(() => {});
-  try { rmSync(getAuthDir(userId), { recursive: true, force: true }); } catch (_) {}
+  // Remove filesystem session files
+  try { rmSync(join(AUTH_DIR, userId), { recursive: true, force: true }); } catch (_) {}
 }
 
 export async function pauseBotInstance(userId: string): Promise<void> {
@@ -712,14 +702,12 @@ const RESTORE_BATCH_DELAY_MS = 3_000;
 export async function restoreAllSessions(): Promise<void> {
   const users = await db.select().from(usersTable).where(eq(usersTable.status, "active"));
 
-  // Filter to only bots that actually have a stored session (DB or filesystem)
+  // Filter to only bots that have a session_id marker AND a creds.json on disk
   const restorable: typeof users = [];
   for (const user of users) {
     if (!user.sessionId) continue;
-    const inDb = await hasStoredSession(user.id);
-    const onDisk = existsSync(join(getAuthDir(user.id), "creds.json"));
-    if (inDb || onDisk) restorable.push(user);
-    else logger.info({ userId: user.id }, "Skipping restore — no saved credentials");
+    if (hasStoredSession(user.id)) restorable.push(user);
+    else logger.info({ userId: user.id }, "Skipping restore — no session files on disk");
   }
 
   logger.info({ total: restorable.length, batchSize: RESTORE_BATCH_SIZE }, "Restoring bot sessions in batches...");

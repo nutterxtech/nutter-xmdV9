@@ -495,6 +495,12 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
     creatingInstances.delete(userId);
     pendingQRCodes.delete(userId);
 
+    // Always wipe any stale partial session data before a new pairing attempt.
+    // requestPairingCode triggers creds.update which persists an incomplete
+    // auth state; the next retry must start with fresh initAuthCreds() or the
+    // noise handshake uses a mismatched key and WhatsApp rejects the connection.
+    await clearDatabaseSession(sessionId).catch(() => {});
+
     let version: [number, number, number];
     try {
       version = await getBaileysVersion();
@@ -613,6 +619,11 @@ export async function initiateQR(userId: string, sessionId: string): Promise<voi
   }
   creatingInstances.delete(userId);
   pendingQRCodes.delete(userId);
+
+  // Always start QR sessions with fresh credentials for the same reason
+  // as initiatePairing — partial creds from a previous QR scan attempt
+  // can cause a mismatched noise key on the next attempt.
+  await clearDatabaseSession(sessionId).catch(() => {});
 
   const version = await getBaileysVersion();
   const { state, saveCreds } = await useDatabaseAuthState(sessionId);

@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { runMigrations } from "./lib/migrate.js";
 import { restoreAllSessions, cleanupExpiredMessages } from "./bot/manager.js";
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
@@ -39,6 +40,12 @@ app.listen(port, async (err) => {
   logger.info({ port }, "NUTTER-XMD API Server listening");
 
   cleanupExpiredMessages();
+
+  try {
+    await runMigrations();
+  } catch (err) {
+    logger.error({ err }, "DB migration failed — server may be unstable");
+  }
 
   try {
     await restoreAllSessions();

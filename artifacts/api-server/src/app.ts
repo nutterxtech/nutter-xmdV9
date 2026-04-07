@@ -55,7 +55,15 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
   const status = (err as { status?: number; statusCode?: number }).status
     ?? (err as { status?: number; statusCode?: number }).statusCode
     ?? 500;
-  res.status(status).json({ error: err.message || "Internal server error" });
+
+  // Sanitise DB / internal errors — never leak SQL or stack traces to the client
+  const isDrizzleError = err.message?.startsWith("Failed query:");
+  const isInternalError = status >= 500 || isDrizzleError;
+  const message = isInternalError
+    ? "Service temporarily unavailable. Please try again."
+    : (err.message || "Internal server error");
+
+  res.status(isInternalError ? 503 : status).json({ error: message });
 });
 
 export default app;

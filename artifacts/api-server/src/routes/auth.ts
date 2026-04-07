@@ -12,6 +12,19 @@ import { botInstances, pendingQRCodes } from "../bot/manager.js";
 const router = Router();
 const SALT_ROUNDS = 12;
 
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 200): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 router.post("/auth/register", async (req, res, next) => {
   try {
     const { email, username, password } = req.body as { email: string; username: string; password: string };
@@ -75,10 +88,12 @@ router.post("/auth/login", async (req, res, next) => {
     }
 
     const isEmail = login.includes("@");
-    const [account] = await db
-      .select()
-      .from(accountsTable)
-      .where(isEmail ? eq(accountsTable.email, login.toLowerCase()) : eq(accountsTable.username, login.toLowerCase()));
+    const [account] = await withRetry(() =>
+      db
+        .select()
+        .from(accountsTable)
+        .where(isEmail ? eq(accountsTable.email, login.toLowerCase()) : eq(accountsTable.username, login.toLowerCase()))
+    );
 
     if (!account) {
       res.status(401).json({ error: "Invalid credentials" });

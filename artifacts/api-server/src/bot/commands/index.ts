@@ -62,6 +62,11 @@ export async function handleCommand(
 
   logger.info({ command, chatId, sender }, "Command received");
 
+  // React with a random emoji to every command
+  const REACTIONS = ["🔥","⚡","✅","💫","🎯","💥","🚀","😎","👾","🤖","💎","🌟","✨","🎉","👍","🫡","💪","🏆","⭐","🎊","🥳","🫶","😈","👑","🦁","🐉","🌙","🪄","🏹","🎮"];
+  const reactionEmoji = REACTIONS[Math.floor(Math.random() * REACTIONS.length)];
+  await sock.sendMessage(chatId, { react: { text: reactionEmoji, key: msg.key } }).catch(() => {});
+
   if (settings.autotype) {
     await sock.sendPresenceUpdate("composing", chatId).catch(() => {});
   }

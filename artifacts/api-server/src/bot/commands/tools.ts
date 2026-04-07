@@ -264,7 +264,7 @@ export async function handleToolsCommand(
         }
         if (command === "vv2") {
           await sock.sendMessage(chatId, {
-            text: `✅ *View Once Revealed!*\n\nSent to your DM privately.\n\n_NUTTER-XMD ⚡_`,
+            text: `🤫 *Sent secretly to your DM* 📩\n🔒 _Only you can see it_\n\n_NUTTER-XMD ⚡_`,
           }, { quoted: msg }).catch(() => {});
         }
       } catch (e) {

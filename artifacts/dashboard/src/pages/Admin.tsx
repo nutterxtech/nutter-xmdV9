@@ -63,11 +63,19 @@ export default function Admin() {
   async function loadAccounts() {
     if (!token) return;
     setLoading(true);
+    setError("");
     try {
       const data = await adminGetAccounts(token) as AdminAccount[];
+      if (!Array.isArray(data)) throw new Error("Unexpected response from server");
       setAccounts(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load accounts");
+      const msg = err instanceof Error ? err.message : "Failed to load accounts";
+      if (msg.includes("401") || msg.includes("Unauthorized") || msg.includes("Invalid credentials") || msg.includes("not configured")) {
+        sessionStorage.removeItem("nutter_admin_token");
+        setToken(null);
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }

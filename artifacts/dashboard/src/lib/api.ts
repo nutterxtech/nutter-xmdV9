@@ -159,47 +159,58 @@ export async function adminLogin(username: string, adminKey: string): Promise<{ 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, adminKey }),
   });
-  const data = await res.json();
+  const data = await safeJson(res);
   if (!res.ok) throw new Error((data as { error?: string }).error || "Invalid credentials");
-  return data;
+  return data as { token: string; username: string };
 }
 
 function adminH(token: string): Record<string, string> {
   return { "x-admin-token": token };
 }
 
+async function adminFetch(url: string, opts: RequestInit = {}): Promise<Record<string, unknown>> {
+  const res = await fetch(url, opts);
+  const data = await safeJson(res);
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);
+  }
+  return data;
+}
+
 export async function adminGetAccounts(token: string): Promise<unknown[]> {
   const res = await fetch(`${BASE}/admin/accounts`, { headers: adminH(token) });
-  return res.json();
+  const data = await safeJson(res);
+  if (!res.ok) throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);
+  return Array.isArray(data) ? data : [];
 }
 
 export async function adminGetBots(token: string): Promise<unknown[]> {
   const res = await fetch(`${BASE}/admin/bots`, { headers: adminH(token) });
-  return res.json();
+  const data = await safeJson(res);
+  if (!res.ok) throw new Error((data as { error?: string }).error || `Request failed (${res.status})`);
+  return Array.isArray(data) ? data : [];
 }
 
 export async function adminGetAccountDetail(token: string, id: string): Promise<unknown> {
-  const res = await fetch(`${BASE}/admin/accounts/${id}`, { headers: adminH(token) });
-  return res.json();
+  return adminFetch(`${BASE}/admin/accounts/${id}`, { headers: adminH(token) });
 }
 
 export async function adminGetBotSettings(token: string, botId: string): Promise<unknown> {
-  const res = await fetch(`${BASE}/admin/bots/${botId}/settings`, { headers: adminH(token) });
-  return res.json();
+  return adminFetch(`${BASE}/admin/bots/${botId}/settings`, { headers: adminH(token) });
 }
 
 export async function adminDisconnectBot(token: string, id: string): Promise<unknown> {
-  return (await fetch(`${BASE}/admin/bots/${id}/disconnect`, { method: "POST", headers: adminH(token) })).json();
+  return adminFetch(`${BASE}/admin/bots/${id}/disconnect`, { method: "POST", headers: adminH(token) });
 }
 
 export async function adminSuspendBot(token: string, id: string): Promise<unknown> {
-  return (await fetch(`${BASE}/admin/bots/${id}/suspend`, { method: "POST", headers: adminH(token) })).json();
+  return adminFetch(`${BASE}/admin/bots/${id}/suspend`, { method: "POST", headers: adminH(token) });
 }
 
 export async function adminDeleteBot(token: string, id: string): Promise<unknown> {
-  return (await fetch(`${BASE}/admin/bots/${id}`, { method: "DELETE", headers: adminH(token) })).json();
+  return adminFetch(`${BASE}/admin/bots/${id}`, { method: "DELETE", headers: adminH(token) });
 }
 
 export async function adminDeleteAccount(token: string, id: string): Promise<unknown> {
-  return (await fetch(`${BASE}/admin/accounts/${id}`, { method: "DELETE", headers: adminH(token) })).json();
+  return adminFetch(`${BASE}/admin/accounts/${id}`, { method: "DELETE", headers: adminH(token) });
 }

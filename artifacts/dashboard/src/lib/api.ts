@@ -1,7 +1,17 @@
 // VITE_API_URL is set on Vercel to point at the Heroku backend, e.g.
 // https://my-nutter-xmd.herokuapp.com
 // When running locally or on Replit the proxy handles /api, so no prefix needed.
-const BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "") + "/api";
+const _rawApiUrl = import.meta.env.VITE_API_URL ?? "";
+if (import.meta.env.PROD && !_rawApiUrl) {
+  console.error(
+    "[NUTTER-XMD] VITE_API_URL is not set! " +
+    "Add it to your Vercel project environment variables and redeploy. " +
+    "All API requests will fail until this is fixed."
+  );
+}
+const BASE = _rawApiUrl.replace(/\/$/, "") + "/api";
+// Log the resolved base URL so it's visible in the browser console for debugging.
+console.log("[NUTTER-XMD] API base:", BASE || "(relative — dev mode)");
 
 export function getToken(): string | null {
   return localStorage.getItem("nutter_token");

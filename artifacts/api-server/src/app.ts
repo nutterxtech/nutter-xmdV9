@@ -27,7 +27,19 @@ app.use(
   }),
 );
 
-app.use(cors({ origin: "*" }));
+app.use(cors({
+  origin: "*",
+  methods: "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS",
+  allowedHeaders: "Content-Type,Authorization,x-admin-token",
+  credentials: false,
+}));
+// Explicitly handle OPTIONS preflight for all routes (pass RegExp — Express v5 + path-to-regexp v8
+// no longer accept bare wildcards or unnamed capture groups in strings)
+app.options(/(.*)/, cors({
+  origin: "*",
+  methods: "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS",
+  allowedHeaders: "Content-Type,Authorization,x-admin-token",
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

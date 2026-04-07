@@ -1,4 +1,7 @@
-const BASE = "/api";
+// VITE_API_URL is set on Vercel to point at the Heroku backend, e.g.
+// https://my-nutter-xmd.herokuapp.com
+// When running locally or on Replit the proxy handles /api, so no prefix needed.
+const BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "") + "/api";
 
 export function getToken(): string | null {
   return localStorage.getItem("nutter_token");

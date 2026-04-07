@@ -517,33 +517,7 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
 
     pendingPairings.set(userId, { resolve, reject });
 
-    // Track this timer so we can cancel it if the connection drops before it fires.
-    // Without this, a stale timer from a failed attempt fires during the next retry
-    // and incorrectly rejects the new attempt's pending promise.
-    const pairCodeTimer = setTimeout(async () => {
-      try {
-        const cleanPhone = phone.replace(/[^0-9]/g, "");
-        logger.info({ userId, cleanPhone }, "Requesting pairing code...");
-        const code = await sock.requestPairingCode(cleanPhone);
-        if (code) {
-          const pending = pendingPairings.get(userId);
-          if (pending) {
-            pending.resolve(code);
-            pendingPairings.delete(userId);
-          }
-        }
-      } catch (err) {
-        const pending = pendingPairings.get(userId);
-        if (pending) {
-          pending.reject(err as Error);
-          pendingPairings.delete(userId);
-        }
-      }
-    }, 3000);
-
-    // Timeout: if WhatsApp hasn't confirmed the pairing within 90 s, clean up.
-    // This prevents an orphaned socket from spinning if the user doesn't enter
-    // the code in time or if the connection to WA's servers silently fails.
+    // Safety net: if nothing resolves within 90 s, clean up.
     const pairingTimeout = setTimeout(() => {
       const pending = pendingPairings.get(userId);
       if (pending) {
@@ -558,8 +532,36 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
       }
     }, 90_000);
 
+    // requestPairingCode is called as soon as the noise handshake completes
+    // (Baileys emits connection === 'connecting' at that moment). No artificial
+    // delay — this fires WhatsApp's "enter code" notification immediately.
+    let pairCodeRequested = false;
+
     sock.ev.on("connection.update", async (update) => {
       const { connection, lastDisconnect } = update;
+
+      // Noise handshake done → request code right away
+      if (connection === "connecting" && !pairCodeRequested) {
+        pairCodeRequested = true;
+        try {
+          const cleanPhone = phone.replace(/[^0-9]/g, "");
+          logger.info({ userId, cleanPhone }, "Requesting pairing code...");
+          const code = await sock.requestPairingCode(cleanPhone);
+          if (code) {
+            const pending = pendingPairings.get(userId);
+            if (pending) {
+              pending.resolve(code);
+              pendingPairings.delete(userId);
+            }
+          }
+        } catch (err) {
+          const pending = pendingPairings.get(userId);
+          if (pending) {
+            pending.reject(err as Error);
+            pendingPairings.delete(userId);
+          }
+        }
+      }
 
       if (connection === "close") {
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
@@ -571,10 +573,6 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
 
         if (!wasConnected) {
           // Connection dropped before the user entered the pairing code.
-          // Do NOT attempt createBotInstance — there are no credentials stored
-          // yet so it would reconnect with blank auth and enter an infinite loop.
-          // Clear both timers so stale callbacks can't fire into the next retry.
-          clearTimeout(pairCodeTimer);
           clearTimeout(pairingTimeout);
           const pending = pendingPairings.get(userId);
           if (pending) {
@@ -591,7 +589,7 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
           return;
         }
 
-        // Was connected: normal reconnect flow via createBotInstance (creds are now saved)
+        // Was connected: normal reconnect flow via createBotInstance
         clearTimeout(pairingTimeout);
         const attempts = reconnectAttempts.get(userId) ?? 0;
         const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];

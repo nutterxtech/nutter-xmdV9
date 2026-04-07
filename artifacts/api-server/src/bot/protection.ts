@@ -7,6 +7,15 @@ function normalizeJid(jid: string): string {
 
 const spamTracker = new Map<string, { count: number; lastTime: number }>();
 
+// Evict stale spam tracker entries every 60 seconds to prevent unbounded growth.
+// Any entry whose last activity was more than 60 s ago is irrelevant.
+setInterval(() => {
+  const cutoff = Date.now() - 60_000;
+  for (const [key, tracker] of spamTracker) {
+    if (tracker.lastTime < cutoff) spamTracker.delete(key);
+  }
+}, 60_000).unref();
+
 const GROUP_LINK_REGEX = /chat\.whatsapp\.com\/[A-Za-z0-9]+/gi;
 
 async function applyAction(

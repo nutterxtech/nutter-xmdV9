@@ -161,16 +161,19 @@ function attachHandlers(sock: WASocket, userId: string): void {
       if (processedMsgIds.has(msgKey)) continue;
       processedMsgIds.add(msgKey);
       if (processedMsgIds.size > 2000) {
-        const firstKey = processedMsgIds.values().next().value;
-        if (firstKey) processedMsgIds.delete(firstKey);
+        // Trim bulk — delete oldest 20% to amortize eviction cost
+        const excess = processedMsgIds.size - 1600;
+        let removed = 0;
+        for (const k of processedMsgIds) { if (removed++ >= excess) break; processedMsgIds.delete(k); }
       }
 
       // Cache every message so getMessage() can supply it for retry-decryption
       if (msg.message && msg.key.remoteJid && msg.key.id) {
         msgCache.set(`${msg.key.remoteJid}:${msg.key.id}`, msg.message);
         if (msgCache.size > 2000) {
-          const firstKey = msgCache.keys().next().value;
-          if (firstKey) msgCache.delete(firstKey);
+          const excess = msgCache.size - 1600;
+          let removed = 0;
+          for (const k of msgCache.keys()) { if (removed++ >= excess) break; msgCache.delete(k); }
         }
       }
 

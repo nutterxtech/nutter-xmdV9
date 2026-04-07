@@ -28,10 +28,14 @@ function evict(store: Map<string, Entry>, ttl: number): void {
   for (const [id, entry] of store) {
     if (now - entry.storedAt > ttl) store.delete(id);
   }
-  // Hard cap
+  // Hard cap — trim bulk to avoid O(n) deletion on every insert
   if (store.size > MAX_ENTRIES) {
-    const oldest = store.keys().next().value;
-    if (oldest) store.delete(oldest);
+    const excess = store.size - Math.floor(MAX_ENTRIES * 0.8); // trim to 80% of cap
+    let removed = 0;
+    for (const id of store.keys()) {
+      if (removed++ >= excess) break;
+      store.delete(id);
+    }
   }
 }
 

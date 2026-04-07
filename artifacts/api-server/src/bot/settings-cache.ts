@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 
 type Settings = typeof userSettingsTable.$inferSelect;
 
-const TTL = 60_000;
+const TTL = 30_000;
 
 interface Entry {
   data: Settings;

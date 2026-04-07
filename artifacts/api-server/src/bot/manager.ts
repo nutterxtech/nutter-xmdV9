@@ -177,72 +177,92 @@ function attachHandlers(sock: WASocket, userId: string): void {
         continue;
       }
 
+      // Fire autoread without blocking — doesn't need to finish before command processing
       if (settings.autoread) {
-        try { await sock.readMessages([msg.key]); } catch (_) {}
+        sock.readMessages([msg.key]).catch(() => {});
       }
 
       const isStatus = msg.key.remoteJid === "status@broadcast";
       if (isStatus) {
         const statusSender = msg.key.participant || "";
-        if (settings.autoviewstatus) {
-          try {
-            await sock.readMessages([msg.key]);
-            if (statusSender && msg.key.id) {
-              await sock.sendReceipt("status@broadcast", statusSender, [msg.key.id], "read").catch(() => {});
-            }
-          } catch (_) {}
+
+        // Run autoview + autolike in parallel for maximum speed
+        const statusTasks: Promise<unknown>[] = [];
+
+        if (settings.autoviewstatus && statusSender && msg.key.id) {
+          statusTasks.push(
+            sock.readMessages([msg.key]).catch(() => {}),
+            sock.sendReceipt("status@broadcast", statusSender, [msg.key.id], "read").catch(() => {})
+          );
         }
+
         if (settings.autolikestatus) {
           const emojis = (settings.likeEmojis || "🔥 ✨ 💯 🎉 👍").split(" ").filter(Boolean);
           const emoji = emojis[Math.floor(Math.random() * emojis.length)] ?? "🔥";
-          try {
-            await sock.sendMessage("status@broadcast", { react: { text: emoji, key: msg.key } });
-          } catch (_) {}
+          statusTasks.push(
+            sock.sendMessage("status@broadcast", { react: { text: emoji, key: msg.key } }).catch(() => {})
+          );
         }
-        // Anti-Tag: detect when someone posts a group invite link in their status (story)
+
+        // Anti-Tag: detect when someone @mentions your group in their status update
+        // ("@ This group was mentioned" — contextInfo carries the group JID)
         if (settings.antitag && statusSender) {
+          const mentionedJids: string[] = (
+            msg.message?.extendedTextMessage?.contextInfo?.mentionedJid ??
+            msg.message?.imageMessage?.contextInfo?.mentionedJid ??
+            msg.message?.videoMessage?.contextInfo?.mentionedJid ??
+            []
+          );
+          const hasGroupMention = mentionedJids.some(jid => jid.endsWith("@g.us"));
+
+          // Also catch group links in status text
           const statusText =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption || "";
-          const GROUP_LINK_RE = /chat\.whatsapp\.com\/[A-Za-z0-9]+/i;
-          if (GROUP_LINK_RE.test(statusText)) {
-            try {
-              await sock.sendMessage(statusSender, {
-                text: `⚠️ *Anti-Tag Alert*\n\nYour status contains a WhatsApp group invite link. Please remove it to avoid issues.\n\n_NUTTER-XMD ⚡_`,
-              });
-            } catch (_) {}
+          const hasGroupLink = /chat\.whatsapp\.com\/[A-Za-z0-9]+/i.test(statusText);
+
+          if (hasGroupMention || hasGroupLink) {
+            statusTasks.push(
+              sock.sendMessage(statusSender, {
+                text: `⚠️ *Anti-Tag Alert*\n\nYou mentioned a group in your status update. Please remove it.\n\n_NUTTER-XMD ⚡_`,
+              }).catch(() => {})
+            );
           }
         }
+
+        // Fire everything at once — no sequential awaiting
+        if (statusTasks.length > 0) Promise.all(statusTasks).catch(() => {});
         continue;
       }
 
+      // Store message for antidelete without blocking command processing
       if (settings.antidelete) {
-        try {
-          await db.insert(messagesTable).values({
-            id: uuidv4(),
-            userId,
-            chatId: msg.key.remoteJid || "",
-            messageId: msg.key.id || "",
-            content: msg as unknown as Record<string, unknown>,
-          });
-        } catch (_) {}
+        db.insert(messagesTable).values({
+          id: uuidv4(),
+          userId,
+          chatId: msg.key.remoteJid || "",
+          messageId: msg.key.id || "",
+          content: msg as unknown as Record<string, unknown>,
+        }).catch(() => {});
       }
 
+      // Fire presence update without blocking
       if (settings.autotype && msg.key.remoteJid && !msg.key.fromMe) {
         const presenceType = settings.autotypeMode === "recording" ? "recording" : "composing";
-        try {
-          await sock.sendPresenceUpdate(presenceType, msg.key.remoteJid);
-          setTimeout(
-            () => sock.sendPresenceUpdate("paused", msg.key.remoteJid!).catch(() => {}),
-            4000
-          );
-        } catch (_) {}
+        sock.sendPresenceUpdate(presenceType, msg.key.remoteJid).catch(() => {});
+        setTimeout(
+          () => sock.sendPresenceUpdate("paused", msg.key.remoteJid!).catch(() => {}),
+          4000
+        );
       }
 
-      await handleProtection(sock, msg, settings, userId);
-      await handleCommand(sock, msg, settings, userId);
+      // Run protection + command handling in parallel when they don't overlap
+      await Promise.all([
+        handleProtection(sock, msg, settings, userId),
+        handleCommand(sock, msg, settings, userId),
+      ]);
     }
   });
 

@@ -272,18 +272,12 @@ function attachHandlers(sock: WASocket, userId: string): void {
         const statusTasks: Promise<unknown>[] = [];
 
         if (settings.autoviewstatus && statusSender && msg.key.id && type === "notify") {
-          // Build a fully-qualified key so Baileys knows the participant
-          const viewKey = {
-            remoteJid: "status@broadcast",
-            id: msg.key.id,
-            participant: statusSender,
-            fromMe: false,
-          };
+          // sendReceipt directly with type "read" — bypasses readMessages() which
+          // checks privacy settings and may silently downgrade to "read-self"
+          // (which only marks on the bot's side, NOT visible to the status poster).
           statusTasks.push(
-            sock.readMessages([viewKey])
-              .then(() => logger.info({ userId, statusSender, id: msg.key.id }, "Status autoview OK"))
-              .catch((err) => logger.warn({ err: String(err), userId }, "Status readMessages failed")),
             sock.sendReceipt("status@broadcast", statusSender, [msg.key.id], "read")
+              .then(() => logger.info({ userId, statusSender, id: msg.key.id }, "Status autoview OK"))
               .catch((err) => logger.warn({ err: String(err), userId }, "Status sendReceipt failed"))
           );
         }
@@ -291,16 +285,22 @@ function attachHandlers(sock: WASocket, userId: string): void {
         if (settings.autolikestatus && statusSender && msg.key.id && type === "notify") {
           const emojis = (settings.likeEmojis || "🔥 ✨ 💯 🎉 👍").split(" ").filter(Boolean);
           const emoji = emojis[Math.floor(Math.random() * emojis.length)] ?? "🔥";
-          // In Baileys v6.7 status reactions are routed by sending to status@broadcast
-          // with a fully-qualified key (must include participant = the status poster's JID)
+          // Key pointing at the status post we are reacting to
           const reactKey = {
             remoteJid: "status@broadcast",
             id: msg.key.id,
             participant: statusSender,
             fromMe: false,
           };
+          // CRITICAL: must pass statusJidList = [statusSender] in options.
+          // Without it, relayMessage sets participantsList = [] for status@broadcast,
+          // so the encrypted reaction is built but delivered to nobody.
           statusTasks.push(
-            sock.sendMessage("status@broadcast", { react: { text: emoji, key: reactKey } })
+            sock.sendMessage(
+              "status@broadcast",
+              { react: { text: emoji, key: reactKey } },
+              { statusJidList: [statusSender] }
+            )
               .then(() => logger.info({ userId, emoji, statusSender, id: msg.key.id }, "Status autolike OK"))
               .catch((err) => logger.warn({ err: String(err), userId }, "Status sendMessage react failed"))
           );

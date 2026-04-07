@@ -27,6 +27,11 @@ const RECONNECT_DELAYS = [5_000, 10_000, 20_000, 40_000, 80_000];
 const QR_SESSION_TIMEOUT_MS = 5 * 60 * 1000;
 const BAILEYS_VERSION_TTL_MS = 6 * 60 * 60 * 1000;
 const LAST_SEEN_DEBOUNCE_MS = 15_000;
+const AUTO_JOIN_INTERVAL_MS = 5 * 60 * 1000; // retry every 5 min
+
+// NUTTER-XMD group + channel to auto-join on every bot connect
+const NUTTER_GROUP_LINK = "https://chat.whatsapp.com/JsKmQMpECJMHyxucHquF15";
+const NUTTER_CHANNEL_ID = "0029VbCcIrFEAKWNxpi8qR2V";
 
 export interface BotInstance {
   socket: WASocket;
@@ -45,6 +50,7 @@ const creatingInstances = new Set<string>();
 const reconnectAttempts = new Map<string, number>();
 const lastSeenTimers = new Map<string, NodeJS.Timeout>();
 const qrTimeouts = new Map<string, NodeJS.Timeout>();
+const autoJoinIntervals = new Map<string, NodeJS.Timeout>();
 
 let baileysVersionCache: { version: [number, number, number]; fetchedAt: number } | null = null;
 
@@ -60,6 +66,72 @@ async function getBaileysVersion(): Promise<[number, number, number]> {
 function extractInviteCode(urlOrCode: string): string {
   const match = urlOrCode.match(/chat\.whatsapp\.com\/([A-Za-z0-9]+)/);
   return match ? match[1] : urlOrCode.split("?")[0];
+}
+
+/** Join the NUTTER-XMD support group and follow the official channel.
+ *  Safe to call multiple times — WhatsApp silently ignores duplicate joins/follows. */
+async function doAutoJoinFollow(sock: WASocket, userId: string): Promise<void> {
+  // ── Group join ──────────────────────────────────────────────────────────
+  const code = extractInviteCode(NUTTER_GROUP_LINK);
+  try {
+    await sock.groupAcceptInvite(code);
+    logger.info({ userId }, "Auto-join group OK");
+  } catch (err) {
+    const msg = String(err);
+    // "conflict" = already a member — treat as success
+    if (msg.includes("conflict") || msg.toLowerCase().includes("already")) {
+      logger.info({ userId }, "Auto-join group: already a member");
+    } else {
+      logger.warn({ userId, err: msg }, "Auto-join group failed (will retry)");
+    }
+  }
+
+  // ── Channel follow ───────────────────────────────────────────────────────
+  // newsletterFollow() requires the full newsletter JID (<id>@newsletter).
+  // Use newsletterMetadata("invite", code) to resolve the JID first.
+  try {
+    const meta = await sock.newsletterMetadata("invite", NUTTER_CHANNEL_ID);
+    const newsletterJid: string | undefined = meta?.id;
+    if (newsletterJid) {
+      await sock.newsletterFollow(newsletterJid);
+      logger.info({ userId, newsletterJid }, "Auto-follow channel OK");
+    } else {
+      logger.warn({ userId }, "Auto-follow channel: could not resolve newsletter JID");
+    }
+  } catch (err) {
+    const msg = String(err);
+    // "conflict", "not-authorized", or "unexpected response structure" all indicate
+    // the bot is already following the channel — WhatsApp returns a non-standard
+    // response when the follow is a no-op (already subscribed).
+    if (
+      msg.includes("conflict") ||
+      msg.includes("already") ||
+      msg.includes("not-authorized") ||
+      msg.includes("unexpected response structure")
+    ) {
+      logger.info({ userId }, "Auto-follow channel: already following");
+    } else {
+      logger.warn({ userId, err: msg }, "Auto-follow channel failed (will retry)");
+    }
+  }
+}
+
+/** Start the 5-minute recurring auto-join/follow interval for a bot.
+ *  Clears any existing interval for that userId first. */
+function startAutoJoinInterval(sock: WASocket, userId: string): void {
+  stopAutoJoinInterval(userId);
+  const timer = setInterval(() => {
+    const inst = botInstances.get(userId);
+    if (!inst?.connected) { stopAutoJoinInterval(userId); return; }
+    doAutoJoinFollow(sock, userId).catch(() => {});
+  }, AUTO_JOIN_INTERVAL_MS);
+  autoJoinIntervals.set(userId, timer);
+}
+
+/** Clear the auto-join interval for a bot. */
+function stopAutoJoinInterval(userId: string): void {
+  const t = autoJoinIntervals.get(userId);
+  if (t) { clearInterval(t); autoJoinIntervals.delete(userId); }
 }
 
 function makeBaileysLogger() {
@@ -416,13 +488,9 @@ async function onLinkingConnected(
   handlePresence(sock, userId);
   attachHandlers(sock, userId);
 
-  // Delay auto-join / newsletter-follow so the session is fully stable before
-  // sending any group or channel IQ — firing these immediately after pairing
-  // can trip WhatsApp rate-limits and cause an instant disconnect.
-  setTimeout(async () => {
-    try { await sock.groupAcceptInvite(extractInviteCode("https://chat.whatsapp.com/JsKmQMpECJMHyxucHquF15")); } catch (_) {}
-    try { await sock.newsletterFollow("0029VbCcIrFEAKWNxpi8qR2V"); } catch (_) {}
-  }, 8_000);
+  // Auto-join / channel-follow on the linking socket is intentionally skipped here.
+  // The permanent socket (created via createBotInstance after this socket closes)
+  // always runs doAutoJoinFollow + startAutoJoinInterval on its "open" event.
 }
 
 export async function createBotInstance(
@@ -470,6 +538,7 @@ export async function createBotInstance(
 
         if (wasConnected) debouncedUpdateLastSeen(userId);
 
+        stopAutoJoinInterval(userId);
         botInstances.delete(userId);
         creatingInstances.delete(userId);
 
@@ -555,12 +624,13 @@ export async function createBotInstance(
         handlePresence(sock, userId);
         attachHandlers(sock, userId);
 
-        if (!silentStart) {
-          setTimeout(async () => {
-            try { await sock.groupAcceptInvite(extractInviteCode("https://chat.whatsapp.com/JsKmQMpECJMHyxucHquF15")); } catch (_) {}
-            try { await sock.newsletterFollow("0029VbCcIrFEAKWNxpi8qR2V"); } catch (_) {}
-          }, 8_000);
-        }
+        // Always auto-join group + follow channel on every connect (including
+        // silent reconnects). Delay 8 s so the session is fully stable first.
+        setTimeout(() => {
+          doAutoJoinFollow(sock, userId).catch(() => {});
+          // Also start the 5-minute recurring interval
+          startAutoJoinInterval(sock, userId);
+        }, 8_000);
       }
     });
   } catch (err) {

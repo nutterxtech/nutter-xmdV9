@@ -45,15 +45,21 @@ async function apiFetch(path: string, opts: RequestInit = {}): Promise<Response>
   return res;
 }
 
+async function safeJson(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  if (!text) return {};
+  try { return JSON.parse(text); } catch { return { error: `Server returned unexpected response (${res.status})` }; }
+}
+
 export async function register(email: string, username: string, password: string): Promise<{ token: string; account: Account }> {
   const res = await fetch(`${BASE}/auth/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, username, password }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Registration failed");
-  return data;
+  const data = await safeJson(res);
+  if (!res.ok) throw new Error((data.error as string) || "Registration failed");
+  return data as unknown as { token: string; account: Account };
 }
 
 export async function login(loginVal: string, password: string): Promise<{ token: string; account: Account }> {
@@ -62,9 +68,9 @@ export async function login(loginVal: string, password: string): Promise<{ token
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ login: loginVal, password }),
   });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Login failed");
-  return data;
+  const data = await safeJson(res);
+  if (!res.ok) throw new Error((data.error as string) || "Login failed");
+  return data as unknown as { token: string; account: Account };
 }
 
 export interface Account {

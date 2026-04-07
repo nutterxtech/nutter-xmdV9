@@ -160,7 +160,7 @@ export default function Admin() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
           {[
             { label: "Accounts", value: accounts.length, icon: "👤", color: "#00d4ff" },
-            { label: "Total Bots", value: totalBots, icon: "🤖", color: "#a855f7" },
+            { label: "Total Bots", value: totalBots, icon: "🇰🇪", color: "#a855f7" },
             { label: "Connected", value: connectedBots, icon: "🟢", color: "#22c55e" },
             { label: "Offline", value: totalBots - connectedBots, icon: "🔴", color: "#ef4444" },
           ].map(stat => (

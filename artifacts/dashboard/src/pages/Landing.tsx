@@ -2,7 +2,7 @@ import { useLocation } from "wouter";
 
 const FEATURES = [
   {
-    icon: "🤖",
+    icon: "🇰🇪",
     title: "103 Smart Commands",
     desc: "Full suite of AI, media, fun, group management, and utility commands. Trigger with your custom prefix.",
     color: "#00d4ff",

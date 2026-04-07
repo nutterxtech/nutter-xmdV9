@@ -8,7 +8,7 @@ import {
 } from "@/lib/api";
 
 const TOGGLE_FEATURES = [
-  { key: "chatbot", label: "Auto Reply", icon: "🤖", desc: "Auto-reply to DMs when away", group: "Automation", actionKey: null, actionOptions: null },
+  { key: "chatbot", label: "Auto Reply", icon: "🇰🇪", desc: "Auto-reply to DMs when away", group: "Automation", actionKey: null, actionOptions: null },
   { key: "autoread", label: "Auto Read", icon: "👁️", desc: "Auto-read all incoming messages", group: "Automation", actionKey: null, actionOptions: null },
   { key: "alwaysonline", label: "Always Online", icon: "🟢", desc: "Stay always online on WhatsApp", group: "Automation", actionKey: null, actionOptions: null },
   { key: "autoviewstatus", label: "Auto View Status", icon: "👀", desc: "Auto-view all status updates", group: "Automation", actionKey: null, actionOptions: null },
@@ -340,7 +340,7 @@ export default function Dashboard() {
               boxShadow: activeTab === tab ? `inset 0 0 0 1px rgba(0,212,255,0.25)` : "none",
               transition: "all 0.18s"
             }}>
-              {tab === "bots" ? "🤖 My Bots" : "⚙️ Settings"}
+              {tab === "bots" ? "🇰🇪 My Bots" : "⚙️ Settings"}
             </button>
           ))}
         </div>
@@ -390,7 +390,7 @@ export default function Dashboard() {
 
             {bots.length === 0 && !addingBot && (
               <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: "1rem", padding: "3rem", textAlign: "center" }}>
-                <div style={{ fontSize: "3rem", marginBottom: "0.75rem" }}>🤖</div>
+                <div style={{ fontSize: "3rem", marginBottom: "0.75rem" }}>🇰🇪</div>
                 <h3 style={{ color: C.text, fontWeight: 700, marginBottom: "0.5rem" }}>No bots yet</h3>
                 <p style={{ color: C.muted, fontSize: "0.875rem", marginBottom: "1.5rem" }}>Add your first WhatsApp bot to get started.</p>
                 <button onClick={() => setAddingBot(true)} style={{
@@ -671,7 +671,7 @@ function BotCard({
               background: isConnected ? "rgba(34,197,94,0.12)" : "rgba(100,116,139,0.12)",
               border: `1px solid ${isConnected ? "rgba(34,197,94,0.25)" : C.border}`,
               display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.4rem"
-            }}>🤖</div>
+            }}>🇰🇪</div>
             <div style={{ minWidth: 0 }}>
               {renaming ? (
                 <div style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
@@ -815,7 +815,7 @@ function BotCard({
               <p style={{ color: C.muted, fontSize: "0.82rem", marginBottom: "0.75rem" }}>Enter your WhatsApp number with country code:</p>
               <div style={{ display: "flex", gap: "0.65rem", flexWrap: "wrap" }}>
                 <input
-                  type="tel" placeholder="e.g. 2349012345678"
+                  type="tel" placeholder="e.g. 254758891491"
                   value={pairingPhone}
                   onChange={e => onSetPhone(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && onStartPair()}

@@ -10,7 +10,8 @@ const router = Router();
 function getAdminCredentials(): { username: string; key: string } | null {
   const key = process.env.ADMIN_KEY;
   if (!key) return null;
-  return { username: "nutterx", key };
+  const username = process.env.ADMIN_USERNAME || "nutterx";
+  return { username, key };
 }
 
 function requireAdmin(req: Request, res: Response, next: NextFunction): void {

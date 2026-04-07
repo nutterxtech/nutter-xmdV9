@@ -16,6 +16,7 @@ const basePath = process.env.BASE_PATH || "/";
 
 export default defineConfig({
   base: basePath,
+  appType: "spa",
   plugins: [
     react(),
     tailwindcss(),

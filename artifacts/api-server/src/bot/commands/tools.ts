@@ -1,4 +1,4 @@
-import { WASocket, proto, downloadContentFromMessage, downloadMediaMessage } from "@whiskeysockets/baileys";
+import { WASocket, proto, downloadContentFromMessage } from "@whiskeysockets/baileys";
 import { UserSettings } from "@workspace/db";
 import { randomBytes, randomUUID } from "crypto";
 import { botInstances } from "../manager.js";
@@ -8,6 +8,7 @@ import { promisify } from "util";
 import { writeFile, readFile, unlink, access } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
+import OpenAI from "openai";
 
 const execFileAsync = promisify(execFile);
 
@@ -39,35 +40,37 @@ async function streamToBuffer(stream: AsyncIterable<Buffer>): Promise<Buffer> {
 }
 
 async function downloadQuotedImage(
-  sock: WASocket,
   msg: proto.IWebMessageInfo
 ): Promise<Buffer | null> {
+  // Pull the contextInfo from any possible message wrapper
   const ctx =
     msg.message?.extendedTextMessage?.contextInfo ??
-    msg.message?.imageMessage?.contextInfo;
+    msg.message?.imageMessage?.contextInfo ??
+    msg.message?.videoMessage?.contextInfo ??
+    msg.message?.documentMessage?.contextInfo;
 
-  if (!ctx?.quotedMessage || !ctx.stanzaId) return null;
+  if (!ctx?.quotedMessage) return null;
   const qm = ctx.quotedMessage;
-  if (!qm.imageMessage) return null;
 
-  const fakeMsg: proto.IWebMessageInfo = {
-    key: {
-      remoteJid: msg.key.remoteJid,
-      fromMe: ctx.participant === (sock as any).user?.id,
-      id: ctx.stanzaId,
-      participant: ctx.participant ?? undefined,
-    },
-    message: qm,
-  };
+  // Unwrap any envelope that might wrap the imageMessage
+  const imageMsg =
+    qm.imageMessage ??
+    qm.ephemeralMessage?.message?.imageMessage ??
+    (qm.viewOnceMessage as any)?.message?.imageMessage ??
+    (qm.viewOnceMessageV2 as any)?.message?.imageMessage;
+
+  if (!imageMsg) {
+    console.error("[sticker] quoted message has no imageMessage. keys:", Object.keys(qm));
+    return null;
+  }
 
   try {
-    return await downloadMediaMessage(
-      fakeMsg,
-      "buffer",
-      {},
-      { logger: undefined as any, reuploadRequest: sock.updateMediaMessage }
-    ) as Buffer;
-  } catch {
+    const stream = await downloadContentFromMessage(imageMsg as any, "image");
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  } catch (err) {
+    console.error("[sticker] downloadContentFromMessage failed:", err);
     return null;
   }
 }
@@ -150,10 +153,19 @@ export async function handleToolsCommand(
         return;
       }
       try {
-        const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=en&client=tw-ob&ttsspeed=1`;
-        const resp = await fetch(ttsUrl, { headers: { "User-Agent": "Mozilla/5.0 (compatible; NUTTER-XMD)" } });
-        if (!resp.ok) throw new Error(`TTS fetch failed: ${resp.status}`);
-        const mp3 = Buffer.from(await resp.arrayBuffer());
+        const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+        const apiKey  = process.env.AI_INTEGRATIONS_OPENAI_API_KEY ?? "placeholder";
+        if (!baseURL) throw new Error("OpenAI proxy not configured");
+        const openai = new OpenAI({ baseURL, apiKey });
+
+        const speechResp = await openai.audio.speech.create({
+          model: "tts-1",
+          voice: "nova",
+          input: text.slice(0, 4096),
+          response_format: "mp3",
+        });
+        const mp3 = Buffer.from(await speechResp.arrayBuffer());
+        if (!mp3.length) throw new Error("TTS returned empty audio");
 
         const id = randomUUID();
         const inPath  = join(tmpdir(), `say_in_${id}.mp3`);
@@ -178,7 +190,8 @@ export async function handleToolsCommand(
           mimetype: "audio/ogg; codecs=opus",
           ptt: true,
         }, { quoted: msg });
-      } catch {
+      } catch (err) {
+        console.error("[say] TTS failed:", err);
         await sock.sendMessage(chatId, { text: `❌ TTS failed. Please try again.\n\n_NUTTER-XMD ⚡_` }, { quoted: msg }).catch(() => {});
       }
       break;
@@ -280,7 +293,7 @@ export async function handleToolsCommand(
 
       if (!imgBuf) {
         // Try quoted/replied image
-        imgBuf = await downloadQuotedImage(sock, msg);
+        imgBuf = await downloadQuotedImage(msg);
       }
 
       if (!imgBuf) {
@@ -315,7 +328,8 @@ export async function handleToolsCommand(
         await unlink(outPath).catch(() => {});
 
         await sock.sendMessage(chatId, { sticker: webp }, { quoted: msg });
-      } catch {
+      } catch (err) {
+        console.error("[sticker] conversion failed:", err);
         await sock.sendMessage(chatId, { text: `❌ Failed to create sticker. Make sure you replied to a clear image.\n\n_NUTTER-XMD ⚡_` }, { quoted: msg }).catch(() => {});
       }
       break;

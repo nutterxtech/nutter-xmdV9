@@ -1,17 +1,36 @@
 import { WASocket, proto, downloadMediaMessage } from "@whiskeysockets/baileys";
 import { UserSettings } from "@workspace/db";
-import { execFile } from "child_process";
+import { execFile, execSync } from "child_process";
 import { promisify } from "util";
-import { writeFile, readFile, unlink } from "fs/promises";
+import { writeFile, readFile, unlink, access } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";
 import { randomUUID } from "crypto";
 
 const execFileAsync = promisify(execFile);
 
-function ffmpegPath(): string {
-  return process.env.FFMPEG_PATH || "ffmpeg";
+async function fileExists(p: string): Promise<boolean> {
+  try { await access(p); return true; } catch { return false; }
 }
+
+const FFMPEG_BIN: Promise<string> = (async () => {
+  if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
+  // Try resolving from the current shell PATH
+  try {
+    const p = execSync("which ffmpeg 2>/dev/null", { encoding: "utf8", stdio: ["pipe","pipe","pipe"] }).trim();
+    if (p) return p;
+  } catch {}
+  // Known Nix store paths in Replit
+  const candidates = [
+    "/nix/store/s41bqqrym7dlk8m3nk74fx26kgrx0kv8-replit-runtime-path/bin/ffmpeg",
+    "/usr/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+  ];
+  for (const c of candidates) {
+    if (await fileExists(c)) return c;
+  }
+  return "ffmpeg";
+})();
 
 async function applyFfmpeg(
   inputBuf: Buffer,
@@ -23,8 +42,9 @@ async function applyFfmpeg(
   const inPath  = join(tmpdir(), `nutter_in_${id}.${inputExt}`);
   const outPath = join(tmpdir(), `nutter_out_${id}.${outputExt}`);
   await writeFile(inPath, inputBuf);
+  const bin = await FFMPEG_BIN;
   try {
-    await execFileAsync(ffmpegPath(), [
+    await execFileAsync(bin, [
       "-y", "-i", inPath,
       ...filterArgs,
       outPath,

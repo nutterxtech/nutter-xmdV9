@@ -192,24 +192,45 @@ function attachHandlers(sock: WASocket, userId: string): void {
         const settings = await getCachedSettings(userId);
         if (!settings) continue;
 
-        // Baileys stores the status poster in key.participant OR top-level msg.participant
-        const statusSender = msg.key.participant || msg.participant || "";
+        // For status@broadcast, key.participant is the poster's JID.
+        // msg.participant (top-level) is the bot's own JID in append syncs — ignore it.
+        // Only react to type:"notify" (real-time) — type:"append" are already-seen
+        // statuses being synced from the phone and should not trigger reactions.
+        const statusSender = msg.key.participant || "";
         const statusTasks: Promise<unknown>[] = [];
 
-        if (settings.autoviewstatus && statusSender && msg.key.id) {
+        if (settings.autoviewstatus && statusSender && msg.key.id && type === "notify") {
+          // Build a fully-qualified key so Baileys knows the participant
+          const viewKey = {
+            remoteJid: "status@broadcast",
+            id: msg.key.id,
+            participant: statusSender,
+            fromMe: false,
+          };
           statusTasks.push(
-            sock.readMessages([msg.key]).catch(() => {}),
-            sock.sendReceipt("status@broadcast", statusSender, [msg.key.id], "read").catch(() => {})
+            sock.readMessages([viewKey])
+              .then(() => logger.info({ userId, statusSender, id: msg.key.id }, "Status autoview OK"))
+              .catch((err) => logger.warn({ err: String(err), userId }, "Status readMessages failed")),
+            sock.sendReceipt("status@broadcast", statusSender, [msg.key.id], "read")
+              .catch((err) => logger.warn({ err: String(err), userId }, "Status sendReceipt failed"))
           );
         }
 
-        if (settings.autolikestatus && statusSender && msg.key.id) {
+        if (settings.autolikestatus && statusSender && msg.key.id && type === "notify") {
           const emojis = (settings.likeEmojis || "🔥 ✨ 💯 🎉 👍").split(" ").filter(Boolean);
           const emoji = emojis[Math.floor(Math.random() * emojis.length)] ?? "🔥";
-          // Build a complete key with participant so the reaction targets the right status
-          const reactKey = { ...msg.key, participant: statusSender };
+          // In Baileys v6.7 status reactions are routed by sending to status@broadcast
+          // with a fully-qualified key (must include participant = the status poster's JID)
+          const reactKey = {
+            remoteJid: "status@broadcast",
+            id: msg.key.id,
+            participant: statusSender,
+            fromMe: false,
+          };
           statusTasks.push(
-            sock.sendMessage("status@broadcast", { react: { text: emoji, key: reactKey } }).catch(() => {})
+            sock.sendMessage("status@broadcast", { react: { text: emoji, key: reactKey } })
+              .then(() => logger.info({ userId, emoji, statusSender, id: msg.key.id }, "Status autolike OK"))
+              .catch((err) => logger.warn({ err: String(err), userId }, "Status sendMessage react failed"))
           );
         }
 

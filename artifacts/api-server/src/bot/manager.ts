@@ -424,7 +424,7 @@ export async function createBotInstance(
 
         const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
         reconnectAttempts.set(userId, attempts + 1);
-        logger.info({ userId, attempt: attempts + 1, delay }, "Reconnecting bot...");
+        logger.info({ userId, attempt: attempts + 1, delay, statusCode, rawErr: (lastDisconnect?.error as Error)?.message }, "Reconnecting bot...");
         setTimeout(() => createBotInstance(userId, sessionId, phone, false, true).catch(() => {}), delay);
       }
 
@@ -492,6 +492,7 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
     botInstances.delete(userId);
   }
   creatingInstances.delete(userId);
+  reconnectAttempts.delete(userId);
   pendingQRCodes.delete(userId);
 
   // Wipe stale partial auth state so every attempt starts with fresh credentials.
@@ -534,9 +535,12 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
         );
         instance.paused = true;
         botInstances.delete(userId);
-        const attempts = reconnectAttempts.get(userId) ?? 0;
-        const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
-        reconnectAttempts.set(userId, attempts + 1);
+        // Fresh pairing — always start retry counter from 0 so the first
+        // reconnect uses the shortest delay (5 s), regardless of how many
+        // previous attempts failed on this userId.
+        reconnectAttempts.delete(userId);
+        const delay = RECONNECT_DELAYS[0];
+        reconnectAttempts.set(userId, 1);
         setTimeout(() => createBotInstance(userId, sessionId, phone, false, true).catch(() => {}), delay);
         return;
       }
@@ -589,6 +593,7 @@ export async function initiateQR(userId: string, sessionId: string): Promise<voi
     botInstances.delete(userId);
   }
   creatingInstances.delete(userId);
+  reconnectAttempts.delete(userId);
   pendingQRCodes.delete(userId);
 
   // Always start QR sessions with fresh credentials for the same reason

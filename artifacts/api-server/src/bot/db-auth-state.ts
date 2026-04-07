@@ -36,11 +36,15 @@ function revive(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(revive);
   if (typeof value === "object") {
     const obj = value as Record<string, unknown>;
-    if (
-      (obj["type"] === "Buffer" || obj["buffer"] === true) &&
-      Array.isArray(obj["data"])
-    ) {
-      return Buffer.from(obj["data"] as number[]);
+    if (obj["type"] === "Buffer" || obj["buffer"] === true) {
+      // @whiskeysockets/baileys v6+ serialises Buffers as base64 strings.
+      // Older builds used a number array.  Handle both.
+      if (typeof obj["data"] === "string") {
+        return Buffer.from(obj["data"] as string, "base64");
+      }
+      if (Array.isArray(obj["data"])) {
+        return Buffer.from(obj["data"] as number[]);
+      }
     }
     return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, revive(v)]));
   }

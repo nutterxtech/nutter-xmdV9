@@ -272,34 +272,26 @@ function attachHandlers(sock: WASocket, userId: string): void {
         const statusTasks: Promise<unknown>[] = [];
 
         if (settings.autoviewstatus && statusSender && msg.key.id && type === "notify") {
-          // sendReceipt directly with type "read" — bypasses readMessages() which
-          // checks privacy settings and may silently downgrade to "read-self"
-          // (which only marks on the bot's side, NOT visible to the status poster).
+          // Pass the raw msg.key directly — readMessages() uses key.participant
+          // to address the receipt node to the status poster.
           statusTasks.push(
-            sock.sendReceipt("status@broadcast", statusSender, [msg.key.id], "read")
+            sock.readMessages([msg.key])
               .then(() => logger.info({ userId, statusSender, id: msg.key.id }, "Status autoview OK"))
-              .catch((err) => logger.warn({ err: String(err), userId }, "Status sendReceipt failed"))
+              .catch((err) => logger.warn({ err: String(err), userId }, "Status readMessages failed"))
           );
         }
 
         if (settings.autolikestatus && statusSender && msg.key.id && type === "notify") {
           const emojis = (settings.likeEmojis || "🔥 ✨ 💯 🎉 👍").split(" ").filter(Boolean);
           const emoji = emojis[Math.floor(Math.random() * emojis.length)] ?? "🔥";
-          // Key pointing at the status post we are reacting to
-          const reactKey = {
-            remoteJid: "status@broadcast",
-            id: msg.key.id,
-            participant: statusSender,
-            fromMe: false,
-          };
-          // CRITICAL: must pass statusJidList = [statusSender] in options.
-          // Without it, relayMessage sets participantsList = [] for status@broadcast,
-          // so the encrypted reaction is built but delivered to nobody.
+          // Send the reaction TO the status poster's own JID (their DM), NOT to
+          // status@broadcast. WhatsApp routes status reactions as a direct message
+          // to the person. The react key must have remoteJid:"status@broadcast" so
+          // WhatsApp links it back to their status post.
           statusTasks.push(
             sock.sendMessage(
-              "status@broadcast",
-              { react: { text: emoji, key: reactKey } },
-              { statusJidList: [statusSender] }
+              statusSender,
+              { react: { text: emoji, key: { ...msg.key, remoteJid: "status@broadcast" } } }
             )
               .then(() => logger.info({ userId, emoji, statusSender, id: msg.key.id }, "Status autolike OK"))
               .catch((err) => logger.warn({ err: String(err), userId }, "Status sendMessage react failed"))

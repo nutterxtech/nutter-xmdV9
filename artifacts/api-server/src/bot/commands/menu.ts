@@ -163,22 +163,20 @@ _Powered by *NUTTER-XMD* ⚡_
 _Type ${prefix}<command> to run_
 > *NUTTER-XMD* ⚡`;
 
+  const mentionJid = msg.key.participant || msg.key.remoteJid || "";
   try {
     if (existsSync(MENU_IMAGE_PATH)) {
       const imageBuffer = readFileSync(MENU_IMAGE_PATH);
       await sock.sendMessage(chatId, {
         image: imageBuffer,
         mimetype: "image/png",
-        caption: "⚡ *NUTTER-XMD* — Command Menu",
+        caption: menuText,
+        mentions: [mentionJid],
       }, { quoted: msg });
-      await sock.sendMessage(chatId, {
-        text: menuText,
-        mentions: [msg.key.participant || msg.key.remoteJid || ""],
-      });
     } else {
       await sock.sendMessage(chatId, {
         text: menuText,
-        mentions: [msg.key.participant || msg.key.remoteJid || ""],
+        mentions: [mentionJid],
       }, { quoted: msg });
     }
   } catch (err) {

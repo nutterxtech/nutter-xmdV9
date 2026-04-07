@@ -506,47 +506,23 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
   botInstances.set(userId, instance);
   sock.ev.on("creds.update", saveCreds);
 
-  // Promise that resolves when the WebSocket noise handshake is done and the
-  // socket is ready to send protocol messages (connection === 'connecting').
-  // Rejects if the connection closes before ever reaching that state.
-  let socketReadyResolve!: () => void;
-  let socketReadyReject!: (err: Error) => void;
-  const socketReady = new Promise<void>((res, rej) => {
-    socketReadyResolve = res;
-    socketReadyReject = rej;
-  });
-
-  // Timeout guard — if WA servers don't respond in 30 s, give up
-  const connectTimeout = setTimeout(() => {
-    socketReadyReject(new Error("Connection to WhatsApp timed out — please try again"));
-    instance.paused = true;
-    try { sock.end(undefined); } catch (_) {}
-    botInstances.delete(userId);
-  }, 30_000);
-
+  // connection.update handler — only needed for post-pairing lifecycle.
+  // requestPairingCode is called below once the socket is ready.
   sock.ev.on("connection.update", async (update) => {
     const { connection, lastDisconnect } = update;
 
-    // 'connecting' fires once the WS is open and Baileys has sent the hello
-    // frame — the socket is now ready to accept requestPairingCode
-    if (connection === "connecting") {
-      clearTimeout(connectTimeout);
-      socketReadyResolve();
-    }
-
     if (connection === "close") {
       if (instance.paused) return;
-      clearTimeout(connectTimeout);
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const wasConnected = instance.connected;
-      const rawMsg = (lastDisconnect?.error as Error)?.message ?? "";
 
       if (!wasConnected) {
-        // Dropped before user entered the code — reject socketReady (idempotent)
-        socketReadyReject(new Error(rawMsg || `Connection closed (code ${statusCode}) — please try again`));
         instance.paused = true;
         botInstances.delete(userId);
-        logger.warn({ userId, statusCode, rawError: rawMsg }, "Pairing socket closed before link completed");
+        logger.warn(
+          { userId, statusCode, rawError: (lastDisconnect?.error as Error)?.message },
+          "Pairing socket closed before link completed"
+        );
         return;
       }
 
@@ -563,11 +539,16 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
     }
   });
 
-  // Wait for the socket to be ready, THEN request the pairing code.
-  // 'connection === connecting' is the correct signal: WS open + hello sent.
+  // Wait for the physical WebSocket connection + noise handshake to complete,
+  // then call requestPairingCode. Baileys exposes waitForSocketOpen() which
+  // resolves when ws.isOpen becomes true (TCP + WS handshake done). After that
+  // validateConnection() runs asynchronously (one noise round-trip ~100-300ms),
+  // so we add a short delay before sending the pairing code IQ.
   try {
     logger.info({ userId, cleanPhone }, "Waiting for WA connection...");
-    await socketReady;
+    await (sock as any).waitForSocketOpen();
+    // Brief pause for noise handshake (validateConnection) to complete
+    await new Promise(r => setTimeout(r, 800));
     logger.info({ userId, cleanPhone }, "Requesting pairing code...");
     const code = await sock.requestPairingCode(cleanPhone);
     return code;
@@ -619,8 +600,18 @@ export async function initiateQR(userId: string, sessionId: string): Promise<voi
   }, QR_SESSION_TIMEOUT_MS);
   qrTimeouts.set(userId, qrTimeout);
 
+  // Set once when Baileys emits isNewLogin=true (pair-success IQ received).
+  // Tells the close handler to reconnect with new creds instead of re-showing QR.
+  let pairSucceeded = false;
+
   sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    const { connection, lastDisconnect, qr, isNewLogin } = update;
+
+    // Pair-success: QR was scanned, creds are saved. Socket will close next.
+    if (isNewLogin) {
+      pairSucceeded = true;
+      logger.info({ userId }, "QR scan successful, awaiting reconnect with new creds...");
+    }
 
     if (qr) {
       try {
@@ -645,8 +636,13 @@ export async function initiateQR(userId: string, sessionId: string): Promise<voi
 
       if (isPaused) return;
 
-      if (wasConnected) {
-        logger.info({ userId }, "QR-linked socket dropped, reconnecting via main flow...");
+      if (wasConnected || pairSucceeded) {
+        // Either fully connected and dropped, OR just paired via QR scan.
+        // In both cases, reconnect using the saved credentials.
+        logger.info({ userId }, pairSucceeded && !wasConnected
+          ? "QR pairing complete — reconnecting with new credentials..."
+          : "QR-linked socket dropped — reconnecting via main flow..."
+        );
         const attempts = reconnectAttempts.get(userId) ?? 0;
         const delay = RECONNECT_DELAYS[Math.min(attempts, RECONNECT_DELAYS.length - 1)];
         reconnectAttempts.set(userId, attempts + 1);

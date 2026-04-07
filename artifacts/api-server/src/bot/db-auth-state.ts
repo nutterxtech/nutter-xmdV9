@@ -27,6 +27,19 @@ import { eq } from "drizzle-orm";
 
 type KeyMap = Record<string, Record<string, unknown>>;
 
+// Global registry of flush functions so SIGTERM can drain all pending writes
+const pendingKeyFlushers = new Map<string, () => Promise<void>>();
+
+export async function flushAllPendingKeys(): Promise<void> {
+  await Promise.allSettled([...pendingKeyFlushers.values()].map(f => f()));
+}
+
+export async function flushPendingKeysForSession(sessionId: string): Promise<void> {
+  const flush = pendingKeyFlushers.get(sessionId);
+  if (flush) await flush().catch(() => {});
+  pendingKeyFlushers.delete(sessionId);
+}
+
 function toJsonSafe(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value, BufferJSON.replacer));
 }
@@ -71,25 +84,42 @@ async function upsertKeys(sessionId: string, keys: unknown): Promise<void> {
     });
 }
 
+const KEY_DEBOUNCE_MS = 300;    // write after 300 ms of silence
+const KEY_MAX_WAIT_MS = 2_000;  // but always write within 2 s of first dirty mark
+
 function makeKeyStore(
   keys: KeyMap,
   sessionId: string
 ): {
   get<T extends keyof SignalDataTypeMap>(type: T, ids: string[]): Promise<{ [id: string]: SignalDataTypeMap[T] }>;
   set(data: SignalDataSet): Promise<void>;
+  flush(): Promise<void>;
 } {
   let dirty = false;
-  let timer: NodeJS.Timeout | null = null;
+  let debounceTimer: NodeJS.Timeout | null = null;
+  let maxWaitTimer: NodeJS.Timeout | null = null;
+
+  async function flush() {
+    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+    if (maxWaitTimer)  { clearTimeout(maxWaitTimer);  maxWaitTimer  = null; }
+    if (!dirty) return;
+    dirty = false;
+    await upsertKeys(sessionId, toJsonSafe(keys)).catch(() => {});
+  }
 
   function schedule() {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(async () => {
-      timer = null;
-      if (!dirty) return;
-      dirty = false;
-      await upsertKeys(sessionId, toJsonSafe(keys)).catch(() => {});
-    }, 1_500);
+    // Restart debounce (write after silence)
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(flush, KEY_DEBOUNCE_MS);
+
+    // Start max-wait timer only once per dirty window
+    if (!maxWaitTimer) {
+      maxWaitTimer = setTimeout(flush, KEY_MAX_WAIT_MS);
+    }
   }
+
+  // Register this flush function in the global registry
+  pendingKeyFlushers.set(sessionId, flush);
 
   return {
     get<T extends keyof SignalDataTypeMap>(type: T, ids: string[]) {
@@ -111,6 +141,7 @@ function makeKeyStore(
       schedule();
       return Promise.resolve();
     },
+    flush,
   };
 }
 
@@ -142,6 +173,7 @@ export async function useDatabaseAuthState(sessionId: string): Promise<{
   }
 
   async function clearSession(): Promise<void> {
+    pendingKeyFlushers.delete(sessionId);
     await db.delete(botSessionsTable).where(eq(botSessionsTable.sessionId, sessionId)).catch(() => {});
   }
 
@@ -150,6 +182,7 @@ export async function useDatabaseAuthState(sessionId: string): Promise<{
 
 /** Delete the bot_sessions row for a given session_id. */
 export async function clearDatabaseSession(sessionId: string): Promise<void> {
+  pendingKeyFlushers.delete(sessionId);
   await db.delete(botSessionsTable).where(eq(botSessionsTable.sessionId, sessionId)).catch(() => {});
 }
 

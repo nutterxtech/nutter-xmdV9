@@ -18,7 +18,7 @@ import { handleCommand } from "./commands/index.js";
 import { handleProtection } from "./protection.js";
 import { handlePresence } from "./presence.js";
 import { getCachedSettings, invalidateSettingsCache } from "./settings-cache.js";
-import { useDatabaseAuthState, hasStoredSession, clearDatabaseSession } from "./db-auth-state.js";
+import { useDatabaseAuthState, hasStoredSession, clearDatabaseSession, flushPendingKeysForSession } from "./db-auth-state.js";
 import { storeForAntidelete, popAntidelete, storeViewOnce } from "./msg-store.js";
 import pino from "pino";
 
@@ -530,6 +530,10 @@ export async function createBotInstance(
 
         if (wasConnected) debouncedUpdateLastSeen(userId);
 
+        // Flush any pending Signal key writes immediately so the next
+        // reconnect (or startup) loads a fresh, consistent key state.
+        await flushPendingKeysForSession(sessionId).catch(() => {});
+
         stopAutoJoinInterval(userId);
         botInstances.delete(userId);
         creatingInstances.delete(userId);
@@ -673,6 +677,7 @@ export async function initiatePairing(userId: string, sessionId: string, phone: 
 
     if (connection === "close") {
       if (instance.paused) return;
+      await flushPendingKeysForSession(sessionId).catch(() => {});
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const wasConnected = instance.connected;
 
@@ -798,6 +803,7 @@ export async function initiateQR(userId: string, sessionId: string): Promise<voi
     if (connection === "close") {
       pendingQRCodes.delete(userId);
       clearQRTimeout(userId);
+      await flushPendingKeysForSession(sessionId).catch(() => {});
 
       const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;

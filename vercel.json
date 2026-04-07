@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "pnpm --filter @workspace/dashboard build && cp -r artifacts/dashboard/dist dist",
+  "buildCommand": "pnpm --filter @workspace/dashboard build",
   "outputDirectory": "dist",
   "installCommand": "pnpm install --no-frozen-lockfile",
   "framework": null,
